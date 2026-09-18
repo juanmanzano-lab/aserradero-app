@@ -9,7 +9,7 @@ import streamlit as st
 st.set_page_config(page_title="Optimización de Aserradero", layout="wide")
 
 st.title("🪓 Optimización y Registro de Aserrado de Troncos")
-st.markdown("Sistema inteligente con cálculo cónico de tronco ($D_{menor}$, $D_{mayor}$, $Largo$, $Curvatura$) y control de asiento en Cota 0.")
+st.markdown("Sistema inteligente con cálculo cónico de tronco ($D_{menor}$, $D_{mayor}$, $Largo$, $Curvatura$), plan de corte y reporte acumulado.")
 
 if "historial" not in st.session_state:
     st.session_state.historial = []
@@ -22,9 +22,8 @@ largo = st.sidebar.number_input("Largo del Tronco (cm)", min_value=50.0, max_val
 curvatura = st.sidebar.number_input("Flecha de Curvatura (cm)", min_value=0.0, max_value=20.0, value=2.0, step=0.5)
 kerf_mm = st.sidebar.number_input("Espesor de Corte / Kerf (mm)", min_value=1.0, max_value=10.0, value=2.5, step=0.1)
 
-# Validación de geometría
 if d_mayor < d_menor:
-    st.sidebar.warning("⚠️ El diámetro mayor debe ser mayor o igual al menor. Se igualarán automáticamenete.")
+    st.sidebar.warning("⚠️ El diámetro mayor debe ser mayor o igual al menor. Se ajustará al valor menor.")
     d_mayor = d_menor
 
 st.sidebar.markdown("---")
@@ -51,15 +50,14 @@ for i, df_val in enumerate(default_dims):
     if act:
         inputs_espesores.append({"espesor": float(e), "prioridad": int(p)})
 
-# --- MOTOR DE OPTIMIZACIÓN CÓNICA Y CORTES ---
+# --- ALGORITMO DE OPTIMIZACIÓN ---
 def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_prio):
-    # Cálculo del Diámetro Útil Mínimo considerando Curvatura
     d_efectivo = max(1.0, d_menor - (2.0 * curvatura))
     R_ef = d_efectivo / 2.0
     kc = kerf_mm / 10.0  # cm
     ancho_min_bloque = (2.0 / 3.0) * d_efectivo
 
-    # Volumen Bruto Cónico Real (Fórmula Frustrum / Smalian)
+    # Volumen Bruto Cónico Real (Smalian)
     r_menor_m = (d_menor / 2.0) / 100.0
     r_mayor_m = (d_mayor / 2.0) / 100.0
     largo_m = largo / 100.0
@@ -80,11 +78,6 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
         if dy > R_ef: return 0.0
         return 2.0 * math.sqrt(max(0, R_ef**2 - dy**2))
 
-    def cumple_2tercios(y_top, y_bot):
-        w1 = calc_ancho(y_top)
-        w2 = calc_ancho(y_bot)
-        return min(w1, w2) >= ancho_min_bloque
-
     def area_pieza(y_top, y_bot):
         return ((calc_ancho(y_top) + calc_ancho(y_bot)) / 2.0) * abs(y_top - y_bot)
 
@@ -98,18 +91,15 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
     max_hp1 = 0.60 * d_efectivo
     p1_candidates = []
     steps_p1 = [0]
-    MAX_STEPS = 1200
 
     def search_p1(seq, current_h):
         steps_p1[0] += 1
-        if steps_p1[0] > MAX_STEPS or len(p1_candidates) >= 60 or len(seq) > 8: return
+        if steps_p1[0] > 1200 or len(p1_candidates) >= 60 or len(seq) > 8: return
         if min_hp1 <= current_h <= max_hp1: p1_candidates.append((list(seq), current_h))
         if current_h > max_hp1: return
 
         choices = tablas if len(seq) == 0 else (tablas + bloques)
         for e in choices:
-            y_top = d_efectivo - current_h
-            y_bot = y_top - e
             if current_h + e <= max_hp1 + 1.0:
                 seq.append(e)
                 search_p1(seq, current_h + e + kc)
@@ -124,7 +114,7 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
 
         def search_p2(seq, current_h):
             steps_p2[0] += 1
-            if steps_p2[0] > MAX_STEPS or len(p2_candidates) >= 20 or len(seq) > 8: return
+            if steps_p2[0] > 1200 or len(p2_candidates) >= 20 or len(seq) > 8: return
             rem = h_cant - current_h
             for b in bloques:
                 if abs(rem - b) <= 0.60 and (current_h + b) <= h_cant + 0.05:
@@ -161,7 +151,7 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
 
             vol2 = 0.0
             fase2_items = []
-            z_acc = 0.0  # Anclaje directo en Z=0 (Sin holgura)
+            z_acc = 0.0
 
             for idx_rev, t in enumerate(reversed(p2_seq)):
                 z_bot = z_acc
@@ -216,7 +206,7 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
 
     return best_sol
 
-# --- GRÁFICO ---
+# --- GENERADOR DE GRÁFICOS CON COTAS Z EN AMBAS FASES ---
 def generar_grafico_cortes(sol, d_menor):
     d_efectivo = sol["d_efectivo"]
     h_cant = sol["h_cant"]
@@ -237,7 +227,7 @@ def generar_grafico_cortes(sol, d_menor):
         ax.text(10, -1.2, "+10 cm", fontsize=7.5, color='#333333', ha='center')
 
     # FASE 1
-    ax1.set_title("FASE 1: Tronco Entero\n(Posicionamiento de Sierra desde Arriba)", fontsize=11, fontweight='bold')
+    ax1.set_title("FASE 1: Tronco Entero en Bancada\n(Posicionamiento de Sierra desde Arriba)", fontsize=11, fontweight='bold')
     ax1.set_aspect('equal')
     ax1.plot([-R*1.5, R*1.5], [0, 0], color='black', linewidth=3)
     ax1.text(0, -1.8, "BANCADA (Z = 0.0 cm)", color='darkgreen', fontweight='bold', fontsize=8.5, ha='center')
@@ -257,8 +247,8 @@ def generar_grafico_cortes(sol, d_menor):
 
         ax1.add_patch(patches.Rectangle((-w/2.0, y_next), w, t, edgecolor='black', facecolor=color, alpha=0.85))
         ax1.text(0, y_mid, f"{item['tipo']} {t:.1f} cm", color='white' if t > 2.01 else 'black', fontweight='bold', fontsize=8.5, ha='center', va='center')
-        ax1.axhline(y_next, color='#D32F2F', linestyle=':', linewidth=1.0)
-        ax1.text(R*1.04, y_next + 0.35, f"Corte #{idx+1}: Z = {y_next:.2f} cm", fontsize=7.5, color='black', family='sans-serif')
+        ax1.axhline(y_next, color='#D32F2F', linestyle=':', linewidth=1.2)
+        ax1.text(R*1.04, y_next + 0.35, f"Corte #{idx+1}: Z = {y_next:.2f} cm", fontsize=8.0, fontweight='bold', color='#D32F2F', va='bottom', family='sans-serif')
         y_curr = y_next - kc
 
     y_cut_line = y_curr + kc
@@ -269,8 +259,8 @@ def generar_grafico_cortes(sol, d_menor):
     ax1.set_ylabel("Altura Z sobre Bancada (cm)")
     ax1.grid(True, linestyle=':', alpha=0.4)
 
-    # FASE 2
-    ax2.set_title("FASE 2: Cantón Volteado 180°\n(Asiento Perfecto en Cota 0 | 0 mm Holgura)", fontsize=11, fontweight='bold')
+    # FASE 2 (COTAS VISIBLES EN CADA CORTE)
+    ax2.set_title("FASE 2: Cantón Volteado 180°\n(Asiento Perfecto en Cota 0.00 cm)", fontsize=11, fontweight='bold')
     ax2.set_aspect('equal')
     ax2.plot([-R*1.5, R*1.5], [0, 0], color='black', linewidth=3)
     ax2.text(0, -1.8, "COTA 0.00 CM: Asiento Plano en Bancada", color='darkgreen', fontweight='bold', fontsize=8.5, ha='center')
@@ -283,6 +273,8 @@ def generar_grafico_cortes(sol, d_menor):
     ax2.fill(x_ef_p2[valid_ef], y_ef_p2[valid_ef], color='#F5DEB3', alpha=0.55, edgecolor='#5C4033', linewidth=1.5)
 
     num_fase1 = len(sol["cotas_fase1"])
+    corte_count_fase2 = num_fase1
+
     for idx, item in enumerate(sol["cotas_fase2"]):
         t = item["espesor"]
         z_bot = item["z_bot"]
@@ -299,9 +291,11 @@ def generar_grafico_cortes(sol, d_menor):
         tag = f"BLOQUE BASE {t:.1f} cm (Z=0.00)" if is_last else f"{'Bloque' if t > 2.01 else 'Tabla'} {t:.1f} cm"
         ax2.text(0, z_mid, tag, color='white', fontweight='bold', fontsize=8.5, ha='center', va='center')
 
+        # Dibuja la cota Z en cada línea de corte en la Fase 2
         if z_bot > 0.001:
-            ax2.axhline(z_bot, color='#D32F2F', linestyle=':', linewidth=1.0)
-            ax2.text(R*1.04, z_bot + 0.35, f"Corte #{num_fase1 + idx + 1}: Z = {z_bot:.2f} cm", fontsize=7.5, color='black', family='sans-serif')
+            corte_count_fase2 += 1
+            ax2.axhline(z_bot, color='#D32F2F', linestyle=':', linewidth=1.2)
+            ax2.text(R*1.04, z_bot + 0.35, f"Corte #{corte_count_fase2}: Z = {z_bot:.2f} cm", fontsize=8.0, fontweight='bold', color='#D32F2F', va='bottom', family='sans-serif')
 
     ax2.set_xlim(-R*1.7, R*1.85)
     ax2.set_ylim(-3.5, d_menor + 3.5)
@@ -311,7 +305,7 @@ def generar_grafico_cortes(sol, d_menor):
     plt.tight_layout()
     return fig
 
-# --- RESULTADOS ---
+# --- RENDERIZADO PRINCIPAL ---
 sol = optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, inputs_espesores)
 
 if sol:
@@ -324,7 +318,46 @@ if sol:
     st.markdown("---")
     st.pyplot(generar_grafico_cortes(sol, d_menor))
 
-    st.markdown("### 📈 Reporte de Proyección de Aprovechamiento del Tronco")
+    # --- PLAN DE CORTE DETALLADO PASO A PASO ---
+    st.markdown("### 📋 Plan de Corte Detallado para Operador")
+    col_p1, col_p2 = st.columns(2)
+
+    with col_p1:
+        st.markdown("**FASE 1: Cortes Tronco Entero (Desde arriba)**")
+        plan_f1_data = []
+        for idx, item in enumerate(sol["cotas_fase1"]):
+            plan_f1_data.append({
+                "N° Corte": f"Corte #{idx+1}",
+                "Cota de Sierra (Z)": f"{item['cota_z']:.2f} cm",
+                "Pieza Extraída": f"{item['tipo']} de {item['espesor']:.1f} cm"
+            })
+        st.table(pd.DataFrame(plan_f1_data))
+        st.info(f"💡 **Acción:** Detener cortes y voltear el cantón de **{sol['h_cant']:.1f} cm** exactamente 180°.")
+
+    with col_p2:
+        st.markdown("**FASE 2: Cortes Cantón Volteado (Asiento plano Z=0.00 cm)**")
+        plan_f2_data = []
+        num_fase1 = len(sol["cotas_fase1"])
+        c_num = num_fase1
+        for idx, item in enumerate(sol["cotas_fase2"]):
+            if item["z_bot"] > 0.001:
+                c_num += 1
+                plan_f2_data.append({
+                    "N° Corte": f"Corte #{c_num}",
+                    "Cota de Sierra (Z)": f"{item['cota_z_corte']:.2f} cm",
+                    "Pieza Extraída": f"{item['tipo']} de {item['espesor']:.1f} cm"
+                })
+            else:
+                plan_f2_data.append({
+                    "N° Corte": "Base (Sin Corte)",
+                    "Cota de Sierra (Z)": "0.00 cm (Apoyo)",
+                    "Pieza Extraída": f"Bloque Base de {item['espesor']:.1f} cm"
+                })
+        st.table(pd.DataFrame(plan_f2_data))
+
+    # --- DESGLOSE DE VOLUMEN DE ESTE TRONCO ---
+    st.markdown("---")
+    st.markdown("### 📈 Desglose del Tronco Actual")
     df_desglose = pd.DataFrame([
         {"Categoría": "Bloques Comerciales (Ancho útil ≥ 2/3 D_e)", "Volumen (m³)": round(sol["vol_bloques_m3"], 4), "% del Total": round((sol["vol_bloques_m3"]/sol["vol_bruto_m3"])*100, 2)},
         {"Categoría": "Tablas Auxiliares / Laterales", "Volumen (m³)": round(sol["vol_tablas_m3"], 4), "% del Total": round((sol["vol_tablas_m3"]/sol["vol_bruto_m3"])*100, 2)},
@@ -332,3 +365,77 @@ if sol:
         {"Categoría": "Costeros / Desperdicio por Curvatura y Conicidad", "Volumen (m³)": round(sol["vol_desperdicio_m3"], 4), "% del Total": round((sol["vol_desperdicio_m3"]/sol["vol_bruto_m3"])*100, 2)}
     ])
     st.table(df_desglose)
+
+    col_btn, _ = st.columns([4, 6])
+    with col_btn:
+        if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
+            st.session_state.historial.append({
+                "ID": len(st.session_state.historial) + 1,
+                "D.Menor (cm)": d_menor,
+                "D.Mayor (cm)": d_mayor,
+                "Largo (cm)": largo,
+                "Curvatura (cm)": curvatura,
+                "m³ Entrada": round(sol["vol_bruto_m3"], 4),
+                "m³ Útil": round(sol["vol_m3"], 4),
+                "m³ Bloques": round(sol["vol_bloques_m3"], 4),
+                "m³ Tablas": round(sol["vol_tablas_m3"], 4),
+                "m³ Kerf": round(sol["vol_kerf_m3"], 4),
+                "Rendimiento (%)": round(sol["aprovechamiento_pct"], 2),
+                "Bloque Base Z=0 (cm)": sol["p2_seq"][-1]
+            })
+            st.success("¡Tronco agregado al registro de producción!")
+
+# --- REPORTE DE PRODUCCIÓN COMPLETO CON SUMATORIA TOTAL Y EXCEL ---
+st.markdown("---")
+st.markdown("## 📊 Reporte de Producción Acumulado Diario")
+
+if st.session_state.historial:
+    df_hist = pd.DataFrame(st.session_state.historial)
+
+    tot_bruto = df_hist["m³ Entrada"].sum()
+    tot_util = df_hist["m³ Útil"].sum()
+    tot_bloques = df_hist["m³ Bloques"].sum()
+    tot_tablas = df_hist["m³ Tablas"].sum()
+    tot_kerf = df_hist["m³ Kerf"].sum()
+    prom_rend = (tot_util / tot_bruto * 100.0) if tot_bruto > 0 else 0.0
+
+    st1, st2, st3, st4, st5 = st.columns(5)
+    st1.metric("Total m³ Entrada", f"{tot_bruto:.3f} m³")
+    st2.metric("Total m³ Útil", f"{tot_util:.3f} m³")
+    st3.metric("Total m³ Bloques", f"{tot_bloques:.3f} m³")
+    st4.metric("Total m³ Tablas", f"{tot_tablas:.3f} m³")
+    st5.metric("Rendimiento Global", f"{prom_rend:.1f} %")
+
+    # Creación de la fila de TOTAL al final de la tabla
+    row_total = {
+        "ID": "TOTAL",
+        "D.Menor (cm)": "-",
+        "D.Mayor (cm)": "-",
+        "Largo (cm)": "-",
+        "Curvatura (cm)": "-",
+        "m³ Entrada": round(tot_bruto, 4),
+        "m³ Útil": round(tot_util, 4),
+        "m³ Bloques": round(tot_bloques, 4),
+        "m³ Tablas": round(tot_tablas, 4),
+        "m³ Kerf": round(tot_kerf, 4),
+        "Rendimiento (%)": round(prom_rend, 2),
+        "Bloque Base Z=0 (cm)": "-"
+    }
+
+    df_export = pd.concat([df_hist, pd.DataFrame([row_total])], ignore_index=True)
+    st.dataframe(df_export, use_container_width=True)
+
+    # Generación del archivo Excel en memoria
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_export.to_excel(writer, index=False, sheet_name='Reporte_Produccion')
+
+    st.download_button(
+        label="📥 Descargar Reporte de Producción Completo (.xlsx)",
+        data=output.getvalue(),
+        file_name="reporte_produccion_aserradero.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary"
+    )
+else:
+    st.info("Presiona el botón '📌 Registrar Tronco Procesado en Reporte Diario' para ir guardando el acumulado de troncos del día.")
