@@ -457,3 +457,19 @@ if st.session_state.historial:
     )
 else:
     st.info("Presiona '📌 Registrar Tronco Procesado en Reporte Diario' para acumular la producción de la jornada.")
+# 2. Envío a Google Sheets mediante WebApp
+            if WEBAPP_URL:
+                try:
+                    # Se envía como JSON con redirecciones permitidas
+                    res = requests.post(WEBAPP_URL, json=nuevo_registro, timeout=8)
+                    
+                    if res.status_code == 200:
+                        st.info("☁️ Registro respaldado con éxito en Google Sheets.")
+                    elif res.status_code == 404:
+                        st.error("⚠️ Error 404: La URL en Secrets no termina en '/exec' o la WebApp no está publicada.")
+                    else:
+                        st.warning(f"Guardado localmente. Código recibido de Google: {res.status_code}")
+                except Exception as ex:
+                    st.warning(f"Guardado localmente. No se pudo conectar con Google Sheets: {ex}")
+            else:
+                st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar el respaldo en la nube.")
