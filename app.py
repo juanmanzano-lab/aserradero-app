@@ -1,31 +1,24 @@
 import math
 import io
+import requests
 from datetime import datetime
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(page_title="Optimización de Aserradero", layout="wide")
 
 st.title("🪓 Optimización y Registro de Aserrado de Troncos")
-st.markdown("Sistema inteligente con cálculo cónico de tronco ($D_{menor}$, $D_{mayor}$, $Largo$, $Curvatura$), plan de corte y registro en Google Sheets.")
+st.markdown("Sistema inteligente con cálculo cónico de tronco ($D_{menor}$, $D_{mayor}$, $Largo$, $Curvatura$), plan de corte y registro acumulado.")
 
-# --- CONEXIÓN PERSISTENTE CON GOOGLE SHEETS ---
-gsheets_activa = False
-df_hist_gsheets = pd.DataFrame()
+# --- INICIALIZACIÓN DE HISTORIAL LOCAL EN MEMORIA ---
+if "historial" not in st.session_state:
+    st.session_state.historial = []
 
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    # Lectura en tiempo real (ttl=0 para no almacenar en caché datos desactualizados)
-    df_hist_gsheets = conn.read(worksheet="Hoja 1", ttl=0)
-    if df_hist_gsheets is not None and not df_hist_gsheets.empty:
-        df_hist_gsheets = df_hist_gsheets.dropna(how="all")
-    gsheets_activa = True
-except Exception as e:
-    gsheets_activa = False
+# URL de Google Apps Script (Si está configurado en Secrets)
+WEBAPP_URL = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
 
 # --- PARÁMETROS DE ENTRADA ---
 st.sidebar.header("📐 Parámetros del Tronco")
@@ -63,13 +56,13 @@ for i, df_val in enumerate(default_dims):
     if act:
         inputs_espesores.append({"espesor": float(e), "prioridad": int(p)})
 
-# --- ALGORITMO DE OPTIMIZACIÓN ---
+# --- ALGORITMO DE OPTIMIZACIÓN Y APROVECHAMIENTO ---
 def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_prio):
     d_efectivo = max(1.0, d_menor - (2.0 * curvatura))
     R_ef = d_efectivo / 2.0
     kc = kerf_mm / 10.0  # cm
 
-    # Volumen Bruto Cónico Real (Smalian)
+    # Volumen Bruto Cónico Real (Fórmula de Smalian)
     r_menor_m = (d_menor / 2.0) / 100.0
     r_mayor_m = (d_mayor / 2.0) / 100.0
     largo_m = largo / 100.0
@@ -216,7 +209,7 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
 
     return best_sol
 
-# --- GRÁFICOS DE CORTES ---
+# --- GENERADOR DE GRÁFICOS DE CORTES Y COTAS Z ---
 def generar_grafico_cortes(sol, d_menor):
     d_efectivo = sol["d_efectivo"]
     h_cant = sol["h_cant"]
@@ -269,7 +262,7 @@ def generar_grafico_cortes(sol, d_menor):
     ax1.set_ylabel("Altura Z sobre Bancada (cm)")
     ax1.grid(True, linestyle=':', alpha=0.4)
 
-    # FASE 2
+    # FASE 2: COTAS VISIBLES EN CADA CORTE DE FASE 2
     ax2.set_title("FASE 2: Cantón Volteado 180°\n(Asiento Perfecto en Cota 0.00 cm)", fontsize=11, fontweight='bold')
     ax2.set_aspect('equal')
     ax2.plot([-R*1.5, R*1.5], [0, 0], color='black', linewidth=3)
@@ -300,6 +293,7 @@ def generar_grafico_cortes(sol, d_menor):
         tag = f"BLOQUE BASE {t:.1f} cm (Z=0.00)" if is_last else f"{'Bloque' if t > 2.01 else 'Tabla'} {t:.1f} cm"
         ax2.text(0, z_mid, tag, color='white', fontweight='bold', fontsize=8.5, ha='center', va='center')
 
+        # Dibujo explícito de la cota Z en la Fase 2
         if z_bot > 0.001:
             corte_count_fase2 += 1
             ax2.axhline(z_bot, color='#D32F2F', linestyle=':', linewidth=1.2)
@@ -313,12 +307,12 @@ def generar_grafico_cortes(sol, d_menor):
     plt.tight_layout()
     return fig
 
-# --- RESULTADOS PRINCIPALES ---
+# --- RENDERIZADO DE RESULTADOS ---
 sol = optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, inputs_espesores)
 
 if sol:
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Volumen Cónico Entrada", f"{sol['vol_bruto_m3']:.3f} m³")
+    m1.metric("Volumen Cónico Entrada (Smalian)", f"{sol['vol_bruto_m3']:.3f} m³")
     m2.metric("Volumen Útil Comercial", f"{sol['vol_m3']:.3f} m³")
     m3.metric("Rendimiento / Aprovechamiento", f"{sol['aprovechamiento_pct']:.1f} %")
     m4.metric("Diámetro Útil Efectivo", f"{sol['d_efectivo']:.1f} cm")
@@ -326,6 +320,7 @@ if sol:
     st.markdown("---")
     st.pyplot(generar_grafico_cortes(sol, d_menor))
 
+    # PLAN DE CORTE PARA OPERADOR
     st.markdown("### 📋 Plan de Corte Detallado para Operador")
     col_p1, col_p2 = st.columns(2)
 
@@ -361,6 +356,7 @@ if sol:
                 })
         st.table(pd.DataFrame(plan_f2_data))
 
+    # DESGLOSE DE VOLUMEN
     st.markdown("---")
     st.markdown("### 📈 Desglose del Tronco Actual")
     df_desglose = pd.DataFrame([
@@ -371,14 +367,12 @@ if sol:
     ])
     st.table(df_desglose)
 
-    # BOTÓN DE GUARDADO EN GOOGLE SHEETS
+    # BOTÓN DE REGISTRO DUAL (LOCAL + GOOGLE SHEETS)
     col_btn, _ = st.columns([4, 6])
     with col_btn:
         if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
-            nuevo_id = len(df_hist_gsheets) + 1 if (df_hist_gsheets is not None and not df_hist_gsheets.empty) else 1
-            
             nuevo_registro = {
-                "ID": nuevo_id,
+                "ID": len(st.session_state.historial) + 1,
                 "Fecha_Hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "D.Menor (cm)": d_menor,
                 "D.Mayor (cm)": d_mayor,
@@ -392,42 +386,32 @@ if sol:
                 "Rendimiento (%)": round(sol["aprovechamiento_pct"], 2),
                 "Bloque Base Z=0 (cm)": sol["p2_seq"][-1]
             }
-            
-            df_nuevo = pd.DataFrame([nuevo_registro])
-            
-            if gsheets_activa:
+
+            # 1. Guardar en memoria local
+            st.session_state.historial.append(nuevo_registro)
+            st.success("✅ ¡Tronco agregado al reporte de producción diaria!")
+
+            # 2. Intentar guardar en Google Sheets si la WebApp URL está configurada
+            if WEBAPP_URL:
                 try:
-                    if df_hist_gsheets is not None and not df_hist_gsheets.empty:
-                        df_actualizado = pd.concat([df_hist_gsheets, df_nuevo], ignore_index=True)
-                    else:
-                        df_actualizado = df_nuevo
-                    
-                    conn.update(worksheet="Hoja 1", data=df_actualizado)
-                    st.success("✅ ¡Tronco guardado permanentemente en Google Sheets!")
-                    st.rerun()
+                    res = requests.post(WEBAPP_URL, json=nuevo_registro, timeout=5)
+                    if res.status_code == 200:
+                        st.info("☁️ Sincronizado correctamente con Google Sheets.")
                 except Exception as ex:
-                    st.error(f"❌ Error al guardar en Google Sheets: {ex}")
-            else:
-                st.error("⚠️ La conexión con Google Sheets no está activa aún. Por favor revisa la configuración de Secrets en Streamlit Cloud.")
+                    st.warning(f"Guardado localmente. No se pudo enviar a Google Sheets: {ex}")
 
-# --- REPORTE DE PRODUCCIÓN ACUMULADO DESDE GOOGLE SHEETS ---
+# --- REPORTE DE PRODUCCIÓN ACUMULADO DIARIO CON SUMATORIA Y EXCEL ---
 st.markdown("---")
-st.markdown("## 📊 Reporte de Producción Acumulado Diario (Persistente)")
+st.markdown("## 📊 Reporte de Producción Acumulado Diario")
 
-if gsheets_activa and df_hist_gsheets is not None and not df_hist_gsheets.empty:
-    df_mostrar = df_hist_gsheets.copy()
-    
-    # Formatear numéricos para sumatorias
-    cols_num = ["m³ Entrada", "m³ Útil", "m³ Bloques", "m³ Tablas", "m³ Kerf", "Rendimiento (%)"]
-    for col in cols_num:
-        if col in df_mostrar.columns:
-            df_mostrar[col] = pd.to_numeric(df_mostrar[col], errors='coerce').fillna(0)
+if st.session_state.historial:
+    df_hist = pd.DataFrame(st.session_state.historial)
 
-    tot_bruto = df_mostrar["m³ Entrada"].sum()
-    tot_util = df_mostrar["m³ Útil"].sum()
-    tot_bloques = df_mostrar["m³ Bloques"].sum()
-    tot_tablas = df_mostrar["m³ Tablas"].sum()
-    tot_kerf = df_mostrar["m³ Kerf"].sum()
+    tot_bruto = df_hist["m³ Entrada"].sum()
+    tot_util = df_hist["m³ Útil"].sum()
+    tot_bloques = df_hist["m³ Bloques"].sum()
+    tot_tablas = df_hist["m³ Tablas"].sum()
+    tot_kerf = df_hist["m³ Kerf"].sum()
     prom_rend = (tot_util / tot_bruto * 100.0) if tot_bruto > 0 else 0.0
 
     st1, st2, st3, st4, st5 = st.columns(5)
@@ -437,7 +421,7 @@ if gsheets_activa and df_hist_gsheets is not None and not df_hist_gsheets.empty:
     st4.metric("Total m³ Tablas", f"{tot_tablas:.3f} m³")
     st5.metric("Rendimiento Global", f"{prom_rend:.1f} %")
 
-    # Fila de Totales
+    # FILA DE TOTALES GENERALES
     row_total = {
         "ID": "TOTAL",
         "Fecha_Hora": "-",
@@ -454,7 +438,7 @@ if gsheets_activa and df_hist_gsheets is not None and not df_hist_gsheets.empty:
         "Bloque Base Z=0 (cm)": "-"
     }
 
-    df_export = pd.concat([df_mostrar, pd.DataFrame([row_total])], ignore_index=True)
+    df_export = pd.concat([df_hist, pd.DataFrame([row_total])], ignore_index=True)
     st.dataframe(df_export, use_container_width=True)
 
     output = io.BytesIO()
@@ -469,4 +453,4 @@ if gsheets_activa and df_hist_gsheets is not None and not df_hist_gsheets.empty:
         type="primary"
     )
 else:
-    st.info("No hay troncos guardados en la hoja de cálculo aún o la conexión está en proceso. Presiona el botón de registrar para guardar el primero.")
+    st.info("Presiona el botón '📌 Registrar Tronco Procesado en Reporte Diario' para ir guardando el acumulado del día.")
