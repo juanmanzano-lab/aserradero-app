@@ -224,7 +224,7 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
 
     return best_sol
 
-# --- GRAFICADOR CON BORDES RECTOS 100% INCRITOS ---
+# --- GRAFICADOR CON BORDES RECTOS 100% INSCRITOS ---
 def generar_grafico_cortes(sol, d_menor):
     d_efectivo = sol["d_efectivo"]
     h_cant = sol["h_cant"]
@@ -391,18 +391,20 @@ if sol:
             st.session_state.historial.append(nuevo_registro)
             st.success("✅ Tronco guardado en el reporte acumulado diario.")
 
-            # 2. Envío a Google Sheets (Si está configurado WEBAPP_URL)
+            # 2. Envío a Google Sheets mediante WebApp
             if WEBAPP_URL:
                 try:
-                    res = requests.post(WEBAPP_URL, json=nuevo_registro, timeout=5)
-                    if res.status_code == 200 and "success" in res.text:
+                    res = requests.post(WEBAPP_URL, json=nuevo_registro, timeout=8)
+                    if res.status_code == 200:
                         st.info("☁️ Registro respaldado con éxito en Google Sheets.")
+                    elif res.status_code == 404:
+                        st.error("⚠️ Error 404: La URL en Secrets no es correcta o no termina en '/exec'. Revisa la publicación en Google Script.")
                     else:
-                        st.warning(f"Guardado localmente. Google Sheets respondió con estado {res.status_code}.")
+                        st.warning(f"Guardado localmente. Código recibido de Google: {res.status_code}")
                 except Exception as ex:
-                    st.warning(f"Guardado localmente. No se pudo conectar a la WebApp: {ex}")
+                    st.warning(f"Guardado localmente. No se pudo conectar con Google Sheets: {ex}")
             else:
-                st.caption("ℹ️ Nota: Para guardar automáticamente en Google Sheets, configura `GOOGLE_SHEET_WEBAPP_URL` en Secrets.")
+                st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar el respaldo en Google Sheets.")
 
 # --- REPORTE ACUMULADO DIARIO CON EXPORTACIÓN A EXCEL ---
 st.markdown("---")
@@ -457,19 +459,3 @@ if st.session_state.historial:
     )
 else:
     st.info("Presiona '📌 Registrar Tronco Procesado en Reporte Diario' para acumular la producción de la jornada.")
-# 2. Envío a Google Sheets mediante WebApp
-            if WEBAPP_URL:
-                try:
-                    # Se envía como JSON con redirecciones permitidas
-                    res = requests.post(WEBAPP_URL, json=nuevo_registro, timeout=8)
-                    
-                    if res.status_code == 200:
-                        st.info("☁️ Registro respaldado con éxito en Google Sheets.")
-                    elif res.status_code == 404:
-                        st.error("⚠️ Error 404: La URL en Secrets no termina en '/exec' o la WebApp no está publicada.")
-                    else:
-                        st.warning(f"Guardado localmente. Código recibido de Google: {res.status_code}")
-                except Exception as ex:
-                    st.warning(f"Guardado localmente. No se pudo conectar con Google Sheets: {ex}")
-            else:
-                st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar el respaldo en la nube.")
