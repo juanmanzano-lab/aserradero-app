@@ -405,13 +405,22 @@ if d_menor > 0 and d_mayor > 0 and len(inputs_espesores) > 0:
                 if WEBAPP_URL:
                     try:
                         url_limpia = WEBAPP_URL.strip()
-                        res = requests.post(
-                            url_limpia,
-                            json=nuevo_registro,
-                            headers={"Content-Type": "application/json"},
-                            allow_redirects=True,
-                            timeout=10
-                        )
+                        params = {
+                            "id": nuevo_registro["ID"],
+                            "fecha_hora": nuevo_registro["Fecha_Hora"],
+                            "d_menor": nuevo_registro["D.Menor (cm)"],
+                            "d_mayor": nuevo_registro["D.Mayor (cm)"],
+                            "largo": nuevo_registro["Largo (cm)"],
+                            "m3_entrada": nuevo_registro["m³ Entrada"],
+                            "m3_util": nuevo_registro["m³ Útil (Rectangular)"],
+                            "m3_bloques": nuevo_registro["m³ Bloques"],
+                            "m3_tablas": nuevo_registro["m³ Tablas"],
+                            "m3_kerf": nuevo_registro["m³ Kerf"],
+                            "rendimiento": nuevo_registro["Rendimiento (%)"],
+                            "bloque_base": nuevo_registro["Bloque Base Z=0 (cm)"]
+                        }
+                        
+                        res = requests.get(url_limpia, params=params, timeout=10)
                         if res.status_code == 200:
                             st.info("☁️ Registro respaldado con éxito en Google Sheets.")
                         else:
