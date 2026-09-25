@@ -22,7 +22,7 @@ WEBAPP_URL = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
 
 
 # =========================================================
-# 1. PARÁMETROS DE ENTRADA (DIÁMETROS INICIALIZADOS EN CERO)
+# 1. PARÁMETROS DE ENTRADA (EN LA PARTE SUPERIOR)
 # =========================================================
 st.header("📐 Dimensiones del Tronco")
 col1, col2, col3, col4 = st.columns(4)
@@ -326,7 +326,7 @@ for i, df_val in enumerate(default_dims):
 
 
 # =========================================================
-# 5. RENDERIZADO DE RESULTADOS Y CONEXIÓN ROBUSTA
+# 5. RENDERIZADO DE RESULTADOS
 # =========================================================
 if d_menor > 0 and d_mayor > 0 and len(inputs_espesores) > 0:
     sol = optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, inputs_espesores)
@@ -415,9 +415,9 @@ if d_menor > 0 and d_mayor > 0 and len(inputs_espesores) > 0:
                         if res.status_code == 200:
                             st.info("☁️ Registro respaldado con éxito en Google Sheets.")
                         else:
-                            st.warning(f"Guardado localmente. Google respondió con estado {res.status_code}")
+                            st.warning(f"Guardado localmente. Código de respuesta de Google: {res.status_code}")
                     except Exception as ex:
-                        st.warning(f"Guardado localmente. No se pudo conectar a la WebApp: {ex}")
+                        st.warning(f"Guardado localmente. No se pudo conectar a la web: {ex}")
                 else:
                     st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar la subida a la nube.")
 else:
@@ -447,7 +447,7 @@ if st.session_state.historial:
     st4.metric("Total m³ Tablas", f"{tot_tablas:.3f} m³")
     st5.metric("Rendimiento Global", f"{prom_rend:.1f} %")
 
-    # Agregar fila de totalización al DataFrame de exportación
+    # Fila de totalización al DataFrame
     row_total = {
         "ID": "TOTAL",
         "Fecha_Hora": "-",
@@ -455,3 +455,25 @@ if st.session_state.historial:
         "D.Mayor (cm)": "-",
         "Largo (cm)": "-",
         "m³ Entrada": round(tot_bruto, 4),
+        "m³ Útil (Rectangular)": round(tot_util, 4),
+        "m³ Bloques": round(tot_bloques, 4),
+        "m³ Tablas": round(tot_tablas, 4),
+        "m³ Kerf": round(tot_kerf, 4),
+        "Rendimiento (%)": round(prom_rend, 2),
+        "Bloque Base Z=0 (cm)": "-"
+    }
+
+    df_export = pd.concat([df_hist, pd.DataFrame([row_total])], ignore_index=True)
+    st.dataframe(df_export, use_container_width=True)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_export.to_excel(writer, index=False, sheet_name='Reporte_Produccion')
+
+    st.download_button(
+        label="📥 Descargar Reporte de Producción con Totales (.xlsx)",
+        data=output.getvalue(),
+        file_name="reporte_produccion_aserradero_totales.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary"
+    )
