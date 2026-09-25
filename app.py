@@ -11,7 +11,7 @@ import streamlit as st
 st.set_page_config(page_title="Optimización de Aserradero", layout="wide")
 
 st.title("🪓 Optimización y Registro de Aserrado de Troncos")
-st.markdown("Sistema con cálculo de **canto vivo 100% rectangular** ($D_{menor}$, $D_{mayor}$, $Largo$, $Curvatura$), plan de corte y almacenamiento seguro.")
+st.markdown("Sistema con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento.")
 
 # --- INICIALIZACIÓN DE HISTORIAL EN MEMORIA LOCAL ---
 if "historial" not in st.session_state:
@@ -20,45 +20,32 @@ if "historial" not in st.session_state:
 # Obtención de la URL de Google Apps Script desde Secrets
 WEBAPP_URL = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
 
-# --- PARÁMETROS DE ENTRADA ---
-st.sidebar.header("📐 Parámetros del Tronco")
-d_menor = st.sidebar.number_input("Diámetro Menor / Punta (cm)", min_value=10.0, max_value=100.0, value=32.0, step=0.5)
-d_mayor = st.sidebar.number_input("Diámetro Mayor / Base (cm)", min_value=10.0, max_value=120.0, value=38.0, step=0.5)
-largo = st.sidebar.number_input("Largo del Tronco (cm)", min_value=50.0, max_value=1000.0, value=250.0, step=10.0)
-curvatura = st.sidebar.number_input("Flecha de Curvatura (cm)", min_value=0.0, max_value=20.0, value=2.0, step=0.5)
-kerf_mm = st.sidebar.number_input("Espesor de Corte / Kerf (mm)", min_value=1.0, max_value=10.0, value=2.5, step=0.1)
+
+# =========================================================
+# 1. PARÁMETROS DE ENTRADA (EN LA PARTE SUPERIOR)
+# =========================================================
+st.header("📐 Dimensiones del Tronco")
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    d_menor = st.number_input("Diámetro Menor (cm)", min_value=10.0, max_value=100.0, value=32.0, step=0.5)
+with col2:
+    d_mayor = st.number_input("Diámetro Mayor (cm)", min_value=10.0, max_value=120.0, value=38.0, step=0.5)
+with col3:
+    largo = st.number_input("Largo del Tronco (cm)", min_value=50.0, max_value=1000.0, value=250.0, step=10.0)
+with col4:
+    kerf_mm = st.number_input("Kerf de Sierra (mm)", min_value=1.0, max_value=10.0, value=2.5, step=0.1)
 
 if d_mayor < d_menor:
-    st.sidebar.warning("⚠️ El diámetro mayor debe ser mayor o igual al menor. Se ajustará al valor menor.")
+    st.warning("⚠️ El diámetro mayor debe ser mayor o igual al menor. Se ajustará al valor menor.")
     d_mayor = d_menor
 
-st.sidebar.markdown("---")
-st.sidebar.header("⚙️ Medidas Solicitadas y Prioridades")
 
-default_dims = [
-    {"espesor": 2.0, "prio": 3, "activa": True},
-    {"espesor": 6.0, "prio": 1, "activa": True},
-    {"espesor": 9.0, "prio": 2, "activa": True},
-    {"espesor": 4.0, "prio": 4, "activa": True},
-    {"espesor": 1.5, "prio": 5, "activa": False},
-]
-
-inputs_espesores = []
-for i, df_val in enumerate(default_dims):
-    col1, col2, col3 = st.sidebar.columns([3, 3, 2])
-    with col1:
-        e = st.number_input(f"Dim {i+1} (cm)", min_value=0.5, max_value=30.0, value=df_val["espesor"], key=f"e_{i}")
-    with col2:
-        p = st.selectbox(f"Prioridad {i+1}", options=[1, 2, 3, 4, 5], index=df_val["prio"]-1, key=f"p_{i}")
-    with col3:
-        act = st.checkbox("Usar", value=df_val["activa"], key=f"act_{i}")
-    
-    if act:
-        inputs_espesores.append({"espesor": float(e), "prioridad": int(p)})
-
-# --- ALGORITMO DE CÁLCULO RECTANGULAR ESTRICTO (CANTO VIVO) ---
+# =========================================================
+# 2. ALGORITMO DE CÁLCULO RECTANGULAR ESTRICTO (CANTO VIVO)
+# =========================================================
 def calcular_ancho_rectangular_recto(y_top, y_bot, R_ef):
-    """Calcula el ancho máximo de un rectángulo con 4 esquinas dentro de la circunferencia R_ef."""
+    """Calcula el ancho máximo de un rectángulo con 4 esquinas dentro de la circunferencia."""
     dy_top = abs(y_top - R_ef)
     dy_bot = abs(y_bot - R_ef)
     dy_max = max(dy_top, dy_bot)
@@ -66,10 +53,11 @@ def calcular_ancho_rectangular_recto(y_top, y_bot, R_ef):
         return 0.0
     return 2.0 * math.sqrt(R_ef**2 - dy_max**2)
 
-def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_prio):
-    d_efectivo = max(1.0, d_menor - (2.0 * curvatura))
+def optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, dimensiones_prio):
+    # Ya no hay curvatura, el D_efectivo es el D_menor
+    d_efectivo = d_menor
     R_ef = d_efectivo / 2.0
-    kc = kerf_mm / 10.0  # cm
+    kc = kerf_mm / 10.0  # Pasar a cm
 
     # Volumen Bruto Cónico Real (Smalian)
     r_menor_m = (d_menor / 2.0) / 100.0
@@ -78,20 +66,21 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
     vol_bruto_m3 = (math.pi * largo_m / 3.0) * (r_menor_m**2 + r_mayor_m**2 + (r_menor_m * r_mayor_m))
 
     prio_map = {item["espesor"]: item["prioridad"] for item in dimensiones_prio if item["espesor"] > 0}
+    if not prio_map:
+        return None # Si no hay medidas, no calcula
+
     E_list = sorted(list(prio_map.keys()))
-    
     tablas = [e for e in E_list if e <= 2.01]
     bloques = [e for e in E_list if e > 2.01]
 
-    if not bloques: bloques = [6.0]
-    if not tablas: tablas = [2.0]
+    if not bloques: bloques = [max(E_list)]
+    if not tablas: tablas = [min(E_list)]
 
     best_sol = None
     best_score = -1e9
 
-    # Exploración de cortes probando diferentes destapes superiores para optimizar canto vivo
     for h_destape in [0.5, 1.0, 1.5, 2.0, 2.5]:
-        z_top_ef = (d_menor - d_efectivo) / 2.0 + d_efectivo - h_destape
+        z_top_ef = d_efectivo - h_destape
 
         min_hp1 = 0.20 * d_efectivo
         max_hp1 = 0.55 * d_efectivo
@@ -224,7 +213,9 @@ def optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, dimensiones_
 
     return best_sol
 
-# --- GRAFICADOR CON BORDES RECTOS 100% INSCRITOS ---
+# =========================================================
+# 3. GRAFICADOR
+# =========================================================
 def generar_grafico_cortes(sol, d_menor):
     d_efectivo = sol["d_efectivo"]
     h_cant = sol["h_cant"]
@@ -233,8 +224,6 @@ def generar_grafico_cortes(sol, d_menor):
     R_ef = d_efectivo / 2.0
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6.5))
-    y_base_ef = (d_menor - d_efectivo) / 2.0
-    y_center_ef = y_base_ef + R_ef
     y_top_ef = sol["z_top_ef"]
 
     def agregar_referencia_ancho(ax):
@@ -244,14 +233,14 @@ def generar_grafico_cortes(sol, d_menor):
         ax.text(10, -1.2, "+10 cm", fontsize=7.5, color='#555555', ha='center')
 
     # FASE 1
-    ax1.set_title("FASE 1: Tronco Entero y Piezas Útiles de Canto Vivo\n(Las 4 esquinas de cada pieza quedan dentro de D_efectivo)", fontsize=10, fontweight='bold')
+    ax1.set_title("FASE 1: Tronco Entero y Piezas Útiles de Canto Vivo", fontsize=10, fontweight='bold')
     ax1.set_aspect('equal')
     ax1.plot([-R*1.5, R*1.5], [0, 0], color='black', linewidth=3)
     ax1.text(0, -1.8, "BANCADA (Z = 0.0 cm)", color='darkgreen', fontweight='bold', fontsize=8.5, ha='center')
     agregar_referencia_ancho(ax1)
 
-    ax1.add_patch(patches.Circle((0, R), R, edgecolor='#8B4513', facecolor='#D2B48C', alpha=0.25, linestyle='--', label=f'D_menor ({d_menor} cm)'))
-    ax1.add_patch(patches.Circle((0, y_center_ef), R_ef, edgecolor='#2E7D32', facecolor='none', linewidth=1.5, linestyle='-', label=f'D_efectivo ({d_efectivo} cm)'))
+    # Circunferencia del tronco (Al no haber curvatura, D_menor = D_efectivo)
+    ax1.add_patch(patches.Circle((0, R), R, edgecolor='#2E7D32', facecolor='#D2B48C', alpha=0.25, linestyle='-', linewidth=1.5, label=f'D_menor ({d_menor} cm)'))
 
     for idx, item in enumerate(sol["cotas_fase1"]):
         t = item["espesor"]
@@ -273,11 +262,15 @@ def generar_grafico_cortes(sol, d_menor):
     ax1.legend(loc='upper right', fontsize=8)
 
     # FASE 2
-    ax2.set_title("FASE 2: Cantón Volteado 180°\n(Cotas de Corte Z y Ancho Útil Rectangular)", fontsize=10, fontweight='bold')
+    ax2.set_title("FASE 2: Cantón Volteado 180°", fontsize=10, fontweight='bold')
     ax2.set_aspect('equal')
     ax2.plot([-R*1.5, R*1.5], [0, 0], color='black', linewidth=3)
     ax2.text(0, -1.8, "COTA 0.00 CM: Asiento Plano", color='darkgreen', fontweight='bold', fontsize=8.5, ha='center')
     agregar_referencia_ancho(ax2)
+
+    # Restauración del círculo en la Fase 2, ajustado visualmente al cantón
+    centro_y_fase2 = h_cant - R_ef
+    ax2.add_patch(patches.Circle((0, centro_y_fase2), R_ef, edgecolor='#2E7D32', facecolor='none', linewidth=1.5, linestyle='--', label=f'Circunferencia'))
 
     corte_count = len(sol["cotas_fase1"])
     for idx, item in enumerate(sol["cotas_fase2"]):
@@ -305,119 +298,145 @@ def generar_grafico_cortes(sol, d_menor):
     plt.tight_layout()
     return fig
 
-# --- RENDERIZADO DE RESULTADOS ---
-sol = optimizar_aserrado(d_menor, d_mayor, largo, curvatura, kerf_mm, inputs_espesores)
-
-if sol:
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Volumen Cónico Entrada (Smalian)", f"{sol['vol_bruto_m3']:.3f} m³")
-    m2.metric("Maderable Útil Canto Vivo (Rectangular)", f"{sol['vol_m3']:.3f} m³")
-    m3.metric("Rendimiento / Aprovechamiento Útil", f"{sol['aprovechamiento_pct']:.1f} %")
-    m4.metric("Diámetro Útil Efectivo", f"{sol['d_efectivo']:.1f} cm")
-
-    st.markdown("---")
-    st.pyplot(generar_grafico_cortes(sol, d_menor))
-
-    # PLAN DE CORTE Y MEDIDAS RECTANGULARES
-    st.markdown("### 📋 Plan de Corte con Anchos Rectangulares Útiles")
-    col_p1, col_p2 = st.columns(2)
-
-    with col_p1:
-        st.markdown("**FASE 1: Cortes Tronco Entero**")
-        plan_f1 = []
-        for idx, item in enumerate(sol["cotas_fase1"]):
-            plan_f1.append({
-                "N° Corte": f"Corte #{idx+1}",
-                "Cota Z (Sierra)": f"{item['cota_z']:.2f} cm",
-                "Pieza Extraída": f"{item['tipo']} {item['espesor']:.1f} cm",
-                "Ancho Útil Rectangular (W)": f"{item['ancho_rect']:.1f} cm"
-            })
-        st.table(pd.DataFrame(plan_f1))
-
-    with col_p2:
-        st.markdown("**FASE 2: Cortes Cantón Volteado (Z=0.00 cm)**")
-        plan_f2 = []
-        c_num = len(sol["cotas_fase1"])
-        for idx, item in enumerate(sol["cotas_fase2"]):
-            if item["z_bot"] > 0.001:
-                c_num += 1
-                plan_f2.append({
-                    "N° Corte": f"Corte #{c_num}",
-                    "Cota Z (Sierra)": f"{item['cota_z_corte']:.2f} cm",
-                    "Pieza Extraída": f"{item['tipo']} {item['espesor']:.1f} cm",
-                    "Ancho Útil Rectangular (W)": f"{item['ancho_rect']:.1f} cm"
-                })
-            else:
-                plan_f2.append({
-                    "N° Corte": "Base (Apoyo)",
-                    "Cota Z (Sierra)": "0.00 cm",
-                    "Pieza Extraída": f"Bloque Base {item['espesor']:.1f} cm",
-                    "Ancho Útil Rectangular (W)": f"{item['ancho_rect']:.1f} cm"
-                })
-        st.table(pd.DataFrame(plan_f2))
-
-    # DESGLOSE DE VOLUMEN
-    st.markdown("---")
-    st.markdown("### 📈 Desglose Estricto del Tronco Actual")
-    df_desglose = pd.DataFrame([
-        {"Categoría": "Bloques Comerciales (Canto Vivo)", "Volumen (m³)": round(sol["vol_bloques_m3"], 4), "% del Total": round((sol["vol_bloques_m3"]/sol["vol_bruto_m3"])*100, 2)},
-        {"Categoría": "Tablas Auxiliares (Canto Vivo)", "Volumen (m³)": round(sol["vol_tablas_m3"], 4), "% del Total": round((sol["vol_tablas_m3"]/sol["vol_bruto_m3"])*100, 2)},
-        {"Categoría": "Pérdida por Sangría (Kerf)", "Volumen (m³)": round(sol["vol_kerf_m3"], 4), "% del Total": round((sol["vol_kerf_m3"]/sol["vol_bruto_m3"])*100, 2)},
-        {"Categoría": "Costeros / Desperdicio (Curvatura, Conicidad y Cantos Redondos)", "Volumen (m³)": round(sol["vol_desperdicio_m3"], 4), "% del Total": round((sol["vol_desperdicio_m3"]/sol["vol_bruto_m3"])*100, 2)}
-    ])
-    st.table(df_desglose)
-
-    # BOTÓN DE REGISTRO DUAL
-    col_btn, _ = st.columns([4, 6])
-    with col_btn:
-        if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
-            nuevo_registro = {
-                "ID": len(st.session_state.historial) + 1,
-                "Fecha_Hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "D.Menor (cm)": d_menor,
-                "D.Mayor (cm)": d_mayor,
-                "Largo (cm)": largo,
-                "Curvatura (cm)": curvatura,
-                "m³ Entrada": round(sol["vol_bruto_m3"], 4),
-                "m³ Útil": round(sol["vol_m3"], 4),
-                "m³ Bloques": round(sol["vol_bloques_m3"], 4),
-                "m³ Tablas": round(sol["vol_tablas_m3"], 4),
-                "m³ Kerf": round(sol["vol_kerf_m3"], 4),
-                "Rendimiento (%)": round(sol["aprovechamiento_pct"], 2),
-                "Bloque Base Z=0 (cm)": sol["p2_seq"][-1]
-            }
-
-            # 1. Registro en memoria local
-            st.session_state.historial.append(nuevo_registro)
-            st.success("✅ Tronco guardado en el reporte acumulado diario.")
-
-            # 2. Envío a Google Sheets mediante WebApp
-            if WEBAPP_URL:
-                try:
-                    res = requests.post(WEBAPP_URL, json=nuevo_registro, timeout=8)
-                    if res.status_code == 200:
-                        st.info("☁️ Registro respaldado con éxito en Google Sheets.")
-                    elif res.status_code == 404:
-                        st.error("⚠️ Error 404: La URL en Secrets no es correcta o no termina en '/exec'. Revisa la publicación en Google Script.")
-                    else:
-                        st.warning(f"Guardado localmente. Código recibido de Google: {res.status_code}")
-                except Exception as ex:
-                    st.warning(f"Guardado localmente. No se pudo conectar con Google Sheets: {ex}")
-            else:
-                st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar el respaldo en Google Sheets.")
-
-# --- REPORTE ACUMULADO DIARIO CON EXPORTACIÓN A EXCEL ---
 st.markdown("---")
-st.markdown("## 📊 Reporte de Producción Acumulado Diario")
 
+
+# =========================================================
+# 4. MEDIDAS Y PRIORIDADES (EN LA PARTE INFERIOR)
+# =========================================================
+st.header("⚙️ Medidas Solicitadas y Prioridades")
+st.markdown("💡 **Instrucción:** Debes ingresar al menos una medida mayor a 0 para que se generen los gráficos de corte.")
+
+default_dims = [
+    {"espesor": 0.0, "prio": 1},
+    {"espesor": 0.0, "prio": 2},
+    {"espesor": 0.0, "prio": 3},
+    {"espesor": 0.0, "prio": 4},
+    {"espesor": 0.0, "prio": 5},
+]
+
+inputs_espesores = []
+cols = st.columns(5)
+
+for i, df_val in enumerate(default_dims):
+    with cols[i]:
+        e = st.number_input(f"Medida {i+1} (cm)", min_value=0.0, max_value=30.0, value=df_val["espesor"], step=0.5, key=f"e_{i}")
+        p = st.selectbox(f"Prioridad {i+1}", options=[1, 2, 3, 4, 5], index=df_val["prio"]-1, key=f"p_{i}")
+        
+        # Solo se toman en cuenta si son mayores a 0
+        if e > 0:
+            inputs_espesores.append({"espesor": float(e), "prioridad": int(p)})
+
+
+# =========================================================
+# 5. RENDERIZADO CONDICIONAL DE RESULTADOS Y TABLAS
+# =========================================================
+if len(inputs_espesores) > 0:
+    sol = optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, inputs_espesores)
+
+    if sol:
+        st.markdown("---")
+        st.pyplot(generar_grafico_cortes(sol, d_menor))
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Volumen Entrada (Smalian)", f"{sol['vol_bruto_m3']:.3f} m³")
+        m2.metric("Maderable Canto Vivo", f"{sol['vol_m3']:.3f} m³")
+        m3.metric("Rendimiento (Aprovechamiento)", f"{sol['aprovechamiento_pct']:.1f} %")
+        m4.metric("Diámetro Base Usado", f"{sol['d_efectivo']:.1f} cm")
+
+        # PLAN DE CORTE Y MEDIDAS RECTANGULARES
+        st.markdown("### 📋 Plan de Corte con Anchos Rectangulares Útiles")
+        col_p1, col_p2 = st.columns(2)
+
+        with col_p1:
+            st.markdown("**FASE 1: Cortes Tronco Entero**")
+            plan_f1 = []
+            for idx, item in enumerate(sol["cotas_fase1"]):
+                plan_f1.append({
+                    "N° Corte": f"Corte #{idx+1}",
+                    "Cota Z (Sierra)": f"{item['cota_z']:.2f} cm",
+                    "Pieza Extraída": f"{item['tipo']} {item['espesor']:.1f} cm",
+                    "Ancho Útil": f"{item['ancho_rect']:.1f} cm"
+                })
+            st.table(pd.DataFrame(plan_f1))
+
+        with col_p2:
+            st.markdown("**FASE 2: Cortes Cantón Volteado (Z=0.00 cm)**")
+            plan_f2 = []
+            c_num = len(sol["cotas_fase1"])
+            for idx, item in enumerate(sol["cotas_fase2"]):
+                if item["z_bot"] > 0.001:
+                    c_num += 1
+                    plan_f2.append({
+                        "N° Corte": f"Corte #{c_num}",
+                        "Cota Z (Sierra)": f"{item['cota_z_corte']:.2f} cm",
+                        "Pieza Extraída": f"{item['tipo']} {item['espesor']:.1f} cm",
+                        "Ancho Útil": f"{item['ancho_rect']:.1f} cm"
+                    })
+                else:
+                    plan_f2.append({
+                        "N° Corte": "Base (Apoyo)",
+                        "Cota Z (Sierra)": "0.00 cm",
+                        "Pieza Extraída": f"Bloque Base {item['espesor']:.1f} cm",
+                        "Ancho Útil": f"{item['ancho_rect']:.1f} cm"
+                    })
+            st.table(pd.DataFrame(plan_f2))
+
+        # BOTÓN DE REGISTRO DUAL
+        st.markdown("---")
+        col_btn, _ = st.columns([4, 6])
+        with col_btn:
+            if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
+                nuevo_registro = {
+                    "ID": len(st.session_state.historial) + 1,
+                    "Fecha_Hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "D.Menor (cm)": d_menor,
+                    "D.Mayor (cm)": d_mayor,
+                    "Largo (cm)": largo,
+                    "m³ Entrada": round(sol["vol_bruto_m3"], 4),
+                    "m³ Útil (Rectangular)": round(sol["vol_m3"], 4),
+                    "m³ Bloques": round(sol["vol_bloques_m3"], 4),
+                    "m³ Tablas": round(sol["vol_tablas_m3"], 4),
+                    "m³ Kerf": round(sol["vol_kerf_m3"], 4),
+                    "Rendimiento (%)": round(sol["aprovechamiento_pct"], 2),
+                    "Bloque Base Z=0 (cm)": sol["p2_seq"][-1]
+                }
+
+                # 1. Registro en memoria local
+                st.session_state.historial.append(nuevo_registro)
+                st.success("✅ Tronco guardado en el reporte acumulado diario local.")
+
+                # 2. Envío a Google Sheets (Si está configurado WEBAPP_URL)
+                if WEBAPP_URL:
+                    try:
+                        res = requests.post(WEBAPP_URL, json=nuevo_registro, timeout=8)
+                        if res.status_code == 200:
+                            st.info("☁️ Registro respaldado con éxito en Google Sheets.")
+                        elif res.status_code == 404:
+                            st.error("⚠️ Error 404: La URL en Secrets no es correcta o le falta terminar en '/exec'.")
+                        else:
+                            st.warning(f"Guardado localmente. Código de error de Google: {res.status_code}")
+                    except Exception as ex:
+                        st.warning(f"Guardado localmente. No se pudo conectar a la web: {ex}")
+                else:
+                    st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar la subida a la nube.")
+else:
+    st.info("⚠️ Ingresa al menos una medida mayor a 0.0 cm en la sección de abajo para empezar.")
+
+
+# =========================================================
+# 6. REPORTE ACUMULADO Y DESCARGA
+# =========================================================
 if st.session_state.historial:
+    st.markdown("---")
+    st.markdown("## 📊 Reporte de Producción Acumulado Diario")
+    
     df_hist = pd.DataFrame(st.session_state.historial)
 
     tot_bruto = df_hist["m³ Entrada"].sum()
-    tot_util = df_hist["m³ Útil"].sum()
+    tot_util = df_hist["m³ Útil (Rectangular)"].sum()
     tot_bloques = df_hist["m³ Bloques"].sum()
     tot_tablas = df_hist["m³ Tablas"].sum()
-    tot_kerf = df_hist["m³ Kerf"].sum()
     prom_rend = (tot_util / tot_bruto * 100.0) if tot_bruto > 0 else 0.0
 
     st1, st2, st3, st4, st5 = st.columns(5)
@@ -427,28 +446,11 @@ if st.session_state.historial:
     st4.metric("Total m³ Tablas", f"{tot_tablas:.3f} m³")
     st5.metric("Rendimiento Global", f"{prom_rend:.1f} %")
 
-    row_total = {
-        "ID": "TOTAL",
-        "Fecha_Hora": "-",
-        "D.Menor (cm)": "-",
-        "D.Mayor (cm)": "-",
-        "Largo (cm)": "-",
-        "Curvatura (cm)": "-",
-        "m³ Entrada": round(tot_bruto, 4),
-        "m³ Útil": round(tot_util, 4),
-        "m³ Bloques": round(tot_bloques, 4),
-        "m³ Tablas": round(tot_tablas, 4),
-        "m³ Kerf": round(tot_kerf, 4),
-        "Rendimiento (%)": round(prom_rend, 2),
-        "Bloque Base Z=0 (cm)": "-"
-    }
-
-    df_export = pd.concat([df_hist, pd.DataFrame([row_total])], ignore_index=True)
-    st.dataframe(df_export, use_container_width=True)
+    st.dataframe(df_hist, use_container_width=True)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_export.to_excel(writer, index=False, sheet_name='Reporte_Produccion')
+        df_hist.to_excel(writer, index=False, sheet_name='Reporte_Produccion')
 
     st.download_button(
         label="📥 Descargar Reporte de Producción (.xlsx)",
@@ -457,5 +459,3 @@ if st.session_state.historial:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary"
     )
-else:
-    st.info("Presiona '📌 Registrar Tronco Procesado en Reporte Diario' para acumular la producción de la jornada.")
