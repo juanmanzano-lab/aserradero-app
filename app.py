@@ -10,42 +10,95 @@ import streamlit as st
 
 st.set_page_config(page_title="Optimización de Aserradero", layout="wide")
 
-st.title("🪓 Optimización y Registro de Aserrado de Troncos")
-st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento.")
-
-# --- INICIALIZACIÓN DE HISTORIAL EN MEMORIA LOCAL ---
+# --- INICIALIZACIÓN DE ESTADOS EN SESSION STATE ---
 if "historial" not in st.session_state:
     st.session_state.historial = []
+if "jornada_iniciada" not in st.session_state:
+    st.session_state.jornada_iniciada = False
+if "jornada_finalizada" not in st.session_state:
+    st.session_state.jornada_finalizada = False
+if "datos_jornada" not in st.session_state:
+    st.session_state.datos_jornada = {}
 
-# Obtención de la URL de Google Apps Script desde Secrets
 WEBAPP_URL = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
 
 
 # =========================================================
-# 1. PARÁMETROS DE ENTRADA (EN LA PARTE SUPERIOR)
+# MENÚ LATERAL: CONTROL DE JORNADA
 # =========================================================
-st.header("📐 Dimensiones del Tronco")
-col1, col2, col3, col4 = st.columns(4)
+st.sidebar.title("📋 Control de Jornada")
 
-with col1:
-    d_menor = st.number_input("Diámetro Menor (cm)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
-with col2:
-    d_mayor = st.number_input("Diámetro Mayor (cm)", min_value=0.0, max_value=120.0, value=0.0, step=0.5)
-with col3:
-    largo = st.number_input("Largo del Tronco (cm)", min_value=0.0, max_value=1000.0, value=250.0, step=10.0)
-with col4:
-    kerf_mm = st.number_input("Kerf de Sierra (mm)", min_value=1.0, max_value=10.0, value=2.5, step=0.1)
+if not st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada:
+    st.sidebar.subheader("Iniciar Nueva Jornada")
+    fecha_jornada = st.sidebar.date_input("Fecha", datetime.now())
+    turno = st.sidebar.selectbox("Turno de Trabajo", ["Turno Mañana", "Turno Tarde", "Turno Noche"])
+    aserradero = st.sidebar.selectbox("Tipo de Aserradero", ["Aserradero Manual", "Aserradero Hidráulico"])
+    
+    st.sidebar.markdown("**Equipo de Operadores (3 Personas)**")
+    op1 = st.sidebar.text_input("Operador 1", value="")
+    op2 = st.sidebar.text_input("Operador 2", value="")
+    op3 = st.sidebar.text_input("Operador 3", value="")
+    
+    if st.sidebar.button("🚀 Iniciar Jornada", type="primary", use_container_width=True):
+        if not op1.strip() or not op2.strip() or not op3.strip():
+            st.sidebar.error("⚠️ Debes registrar el nombre de los 3 operadores para iniciar.")
+        else:
+            st.session_state.datos_jornada = {
+                "fecha": fecha_jornada.strftime("%Y-%m-%d"),
+                "turno": turno,
+                "aserradero": aserradero,
+                "operadores": f"{op1.strip()}, {op2.strip()}, {op3.strip()}"
+            }
+            st.session_state.jornada_iniciada = True
+            st.rerun()
 
-if d_mayor < d_menor and d_menor > 0:
-    st.warning("⚠️ El diámetro mayor debe ser mayor o igual al menor. Se ajustará al valor menor.")
-    d_mayor = d_menor
+elif st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada:
+    st.sidebar.success("🟢 **JORNADA EN CURSO**")
+    dj = st.session_state.datos_jornada
+    st.sidebar.markdown(f"**Fecha:** {dj['fecha']}")
+    st.sidebar.markdown(f"**Turno:** {dj['turno']}")
+    st.sidebar.markdown(f"**Aserradero:** {dj['aserradero']}")
+    st.sidebar.markdown(f"**Operadores:**\n{dj['operadores']}")
+    
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🛑 Finalizar Jornada", type="secondary", use_container_width=True):
+        st.session_state.jornada_finalizada = True
+        st.session_state.jornada_iniciada = False
+        st.rerun()
+
+elif st.session_state.jornada_finalizada:
+    st.sidebar.error("🔒 **JORNADA FINALIZADA**")
+    dj = st.session_state.datos_jornada
+    st.sidebar.markdown(f"**Fecha:** {dj['fecha']}")
+    st.sidebar.markdown(f"**Turno:** {dj['turno']}")
+    st.sidebar.markdown(f"**Aserradero:** {dj['aserradero']}")
+    st.sidebar.markdown(f"**Operadores:**\n{dj['operadores']}")
+    
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Iniciar Nueva Jornada", type="primary", use_container_width=True):
+        st.session_state.jornada_iniciada = False
+        st.session_state.jornada_finalizada = False
+        st.session_state.historial = []
+        st.session_state.datos_jornada = {}
+        st.rerun()
 
 
 # =========================================================
-# 2. ALGORITMO DE CÁLCULO RECTANGULAR ESTRICTO (CANTO VIVO)
+# TÍTULO Y MENSAJES DE ESTADO
+# =========================================================
+st.title("🪓 Optimización y Registro de Aserrado de Troncos")
+st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento.")
+
+if st.session_state.jornada_finalizada:
+    st.warning("🔒 **La jornada de trabajo ha sido finalizada.** El sistema se encuentra bloqueado para nuevos registros.")
+elif not st.session_state.jornada_iniciada:
+    st.info("👈 **Por favor, completa la información de la jornada y presiona 'Iniciar Jornada' en el menú lateral para habilitar el registro de produccion.**")
+
+
+# =========================================================
+# FUNCIONES ALGORÍTMICAS Y GRÁFICAS
 # =========================================================
 def calcular_ancho_rectangular_recto(y_top, y_bot, R_ef):
-    """Calcula el ancho máximo de un rectángulo con 4 esquinas dentro de la circunferencia."""
     dy_top = abs(y_top - R_ef)
     dy_bot = abs(y_bot - R_ef)
     dy_max = max(dy_top, dy_bot)
@@ -56,9 +109,8 @@ def calcular_ancho_rectangular_recto(y_top, y_bot, R_ef):
 def optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, dimensiones_prio):
     d_efectivo = d_menor
     R_ef = d_efectivo / 2.0
-    kc = kerf_mm / 10.0  # cm
+    kc = kerf_mm / 10.0
 
-    # Volumen Bruto Cónico Real (Smalian)
     r_menor_m = (d_menor / 2.0) / 100.0
     r_mayor_m = (d_mayor / 2.0) / 100.0
     largo_m = largo / 100.0
@@ -80,7 +132,6 @@ def optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, dimensiones_prio):
 
     for h_destape in [0.5, 1.0, 1.5, 2.0, 2.5]:
         z_top_ef = d_efectivo - h_destape
-
         min_hp1 = 0.20 * d_efectivo
         max_hp1 = 0.55 * d_efectivo
         p1_candidates = []
@@ -138,7 +189,6 @@ def optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, dimensiones_prio):
                 for t in p1_seq:
                     y_bot_ef = y_curr_ef - t
                     z_cut_bancada = z_curr_bancada - t
-                    
                     w_rect = calcular_ancho_rectangular_recto(y_curr_ef, y_bot_ef, R_ef)
                     area_rect = w_rect * t
                     v_p = (area_rect * largo) / 1e6
@@ -153,7 +203,6 @@ def optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, dimensiones_prio):
                         "cota_z": round(z_cut_bancada, 2),
                         "tipo": "Bloque" if t > 2.01 else "Tabla"
                     })
-
                     y_curr_ef = y_bot_ef - kc
                     z_curr_bancada = z_cut_bancada - kc
 
@@ -212,10 +261,6 @@ def optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, dimensiones_prio):
 
     return best_sol
 
-
-# =========================================================
-# 3. GRAFICADOR
-# =========================================================
 def generar_grafico_cortes(sol, d_menor):
     d_efectivo = sol["d_efectivo"]
     h_cant = sol["h_cant"]
@@ -237,7 +282,6 @@ def generar_grafico_cortes(sol, d_menor):
     ax1.plot([-R*1.5, R*1.5], [0, 0], color='black', linewidth=3)
     ax1.text(0, -1.8, "BANCADA (Z = 0.0 cm)", color='darkgreen', fontweight='bold', fontsize=8.5, ha='center')
     agregar_referencia_ancho(ax1)
-
     ax1.add_patch(patches.Circle((0, R), R, edgecolor='#2E7D32', facecolor='#D2B48C', alpha=0.25, linestyle='-', linewidth=1.5, label=f'D_menor ({d_menor} cm)'))
 
     for idx, item in enumerate(sol["cotas_fase1"]):
@@ -295,150 +339,169 @@ def generar_grafico_cortes(sol, d_menor):
     plt.tight_layout()
     return fig
 
-st.markdown("---")
-
 
 # =========================================================
-# 4. MEDIDAS Y PRIORIDADES CON VISTO (CHECKBOX)
+# FORMULARIO DE INGRESO (HABILITADO SI LA JORNADA ESTÁ ACTIVA)
 # =========================================================
-st.header("⚙️ Medidas Solicitadas y Prioridades")
-st.markdown("💡 **Instrucción:** Marca la casilla **Usar** e ingresa un valor mayor a 0 para incluir la medida en el plan de corte.")
+if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada:
+    st.header("📐 Dimensiones del Tronco")
+    col1, col2, col3, col4 = st.columns(4)
 
-default_dims = [
-    {"espesor": 0.0, "prio": 1, "usar": True},
-    {"espesor": 0.0, "prio": 2, "usar": True},
-    {"espesor": 0.0, "prio": 3, "usar": True},
-    {"espesor": 0.0, "prio": 4, "usar": False},
-    {"espesor": 0.0, "prio": 5, "usar": False},
-]
+    with col1:
+        d_menor = st.number_input("Diámetro Menor (cm)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+    with col2:
+        d_mayor = st.number_input("Diámetro Mayor (cm)", min_value=0.0, max_value=120.0, value=0.0, step=0.5)
+    with col3:
+        largo = st.number_input("Largo del Tronco (cm)", min_value=0.0, max_value=1000.0, value=250.0, step=10.0)
+    with col4:
+        kerf_mm = st.number_input("Kerf de Sierra (mm)", min_value=1.0, max_value=10.0, value=2.5, step=0.1)
 
-inputs_espesores = []
-cols = st.columns(5)
+    if d_mayor < d_menor and d_menor > 0:
+        st.warning("⚠️ El diámetro mayor debe ser mayor o igual al menor. Se ajustará al valor menor.")
+        d_mayor = d_menor
 
-for i, df_val in enumerate(default_dims):
-    with cols[i]:
-        usar = st.checkbox(f"Usar Medida {i+1}", value=df_val["usar"], key=f"usar_{i}")
-        e = st.number_input(f"Medida {i+1} (cm)", min_value=0.0, max_value=30.0, value=df_val["espesor"], step=0.5, key=f"e_{i}")
-        p = st.selectbox(f"Prioridad {i+1}", options=[1, 2, 3, 4, 5], index=df_val["prio"]-1, key=f"p_{i}")
-        
-        if usar and e > 0:
-            inputs_espesores.append({"espesor": float(e), "prioridad": int(p)})
+    st.markdown("---")
+    st.header("⚙️ Medidas Solicitadas y Prioridades")
+    st.markdown("💡 **Instrucción:** Marca la casilla **Usar** e ingresa un valor mayor a 0 para incluir la medida en el plan de corte.")
 
+    default_dims = [
+        {"espesor": 0.0, "prio": 1, "usar": True},
+        {"espesor": 0.0, "prio": 2, "usar": True},
+        {"espesor": 0.0, "prio": 3, "usar": True},
+        {"espesor": 0.0, "prio": 4, "usar": False},
+        {"espesor": 0.0, "prio": 5, "usar": False},
+    ]
 
-# =========================================================
-# 5. RENDERIZADO DE RESULTADOS
-# =========================================================
-if d_menor > 0 and d_mayor > 0 and len(inputs_espesores) > 0:
-    sol = optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, inputs_espesores)
+    inputs_espesores = []
+    cols = st.columns(5)
 
-    if sol:
-        st.markdown("---")
-        st.pyplot(generar_grafico_cortes(sol, d_menor))
-        
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Volumen Entrada (Smalian)", f"{sol['vol_bruto_m3']:.3f} m³")
-        m2.metric("Maderable Canto Vivo", f"{sol['vol_m3']:.3f} m³")
-        m3.metric("Rendimiento (Aprovechamiento)", f"{sol['aprovechamiento_pct']:.1f} %")
-        m4.metric("Diámetro Menor Usado", f"{sol['d_efectivo']:.1f} cm")
+    for i, df_val in enumerate(default_dims):
+        with cols[i]:
+            usar = st.checkbox(f"Usar Medida {i+1}", value=df_val["usar"], key=f"usar_{i}")
+            e = st.number_input(f"Medida {i+1} (cm)", min_value=0.0, max_value=30.0, value=df_val["espesor"], step=0.5, key=f"e_{i}")
+            p = st.selectbox(f"Prioridad {i+1}", options=[1, 2, 3, 4, 5], index=df_val["prio"]-1, key=f"p_{i}")
+            
+            if usar and e > 0:
+                inputs_espesores.append({"espesor": float(e), "prioridad": int(p)})
 
-        # PLAN DE CORTE
-        st.markdown("### 📋 Plan de Corte con Anchos Rectangulares Útiles")
-        col_p1, col_p2 = st.columns(2)
+    # RENDERIZADO DE RESULTADOS
+    if d_menor > 0 and d_mayor > 0 and len(inputs_espesores) > 0:
+        sol = optimizar_aserrado(d_menor, d_mayor, largo, kerf_mm, inputs_espesores)
 
-        with col_p1:
-            st.markdown("**FASE 1: Cortes Tronco Entero**")
-            plan_f1 = []
-            for idx, item in enumerate(sol["cotas_fase1"]):
-                plan_f1.append({
-                    "N° Corte": f"Corte #{idx+1}",
-                    "Cota Z (Sierra)": f"{item['cota_z']:.2f} cm",
-                    "Pieza Extraída": f"{item['tipo']} {item['espesor']:.1f} cm",
-                    "Ancho Útil": f"{item['ancho_rect']:.1f} cm"
-                })
-            st.table(pd.DataFrame(plan_f1))
+        if sol:
+            st.markdown("---")
+            st.pyplot(generar_grafico_cortes(sol, d_menor))
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Volumen Entrada (Smalian)", f"{sol['vol_bruto_m3']:.3f} m³")
+            m2.metric("Maderable Canto Vivo", f"{sol['vol_m3']:.3f} m³")
+            m3.metric("Rendimiento (Aprovechamiento)", f"{sol['aprovechamiento_pct']:.1f} %")
+            m4.metric("Diámetro Menor Usado", f"{sol['d_efectivo']:.1f} cm")
 
-        with col_p2:
-            st.markdown("**FASE 2: Cortes Cantón Volteado (Z=0.00 cm)**")
-            plan_f2 = []
-            c_num = len(sol["cotas_fase1"])
-            for idx, item in enumerate(sol["cotas_fase2"]):
-                if item["z_bot"] > 0.001:
-                    c_num += 1
-                    plan_f2.append({
-                        "N° Corte": f"Corte #{c_num}",
-                        "Cota Z (Sierra)": f"{item['cota_z_corte']:.2f} cm",
+            st.markdown("### 📋 Plan de Corte con Anchos Rectangulares Útiles")
+            col_p1, col_p2 = st.columns(2)
+
+            with col_p1:
+                st.markdown("**FASE 1: Cortes Tronco Entero**")
+                plan_f1 = []
+                for idx, item in enumerate(sol["cotas_fase1"]):
+                    plan_f1.append({
+                        "N° Corte": f"Corte #{idx+1}",
+                        "Cota Z (Sierra)": f"{item['cota_z']:.2f} cm",
                         "Pieza Extraída": f"{item['tipo']} {item['espesor']:.1f} cm",
                         "Ancho Útil": f"{item['ancho_rect']:.1f} cm"
                     })
-                else:
-                    plan_f2.append({
-                        "N° Corte": "Base (Apoyo)",
-                        "Cota Z (Sierra)": "0.00 cm",
-                        "Pieza Extraída": f"Bloque Base {item['espesor']:.1f} cm",
-                        "Ancho Útil": f"{item['ancho_rect']:.1f} cm"
-                    })
-            st.table(pd.DataFrame(plan_f2))
+                st.table(pd.DataFrame(plan_f1))
 
-        # BOTÓN DE REGISTRO DUAL
-        st.markdown("---")
-        col_btn, _ = st.columns([4, 6])
-        with col_btn:
-            if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
-                nuevo_registro = {
-                    "ID": len(st.session_state.historial) + 1,
-                    "Fecha_Hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "D.Menor (cm)": d_menor,
-                    "D.Mayor (cm)": d_mayor,
-                    "Largo (cm)": largo,
-                    "m³ Entrada": round(sol["vol_bruto_m3"], 4),
-                    "m³ Útil (Rectangular)": round(sol["vol_m3"], 4),
-                    "m³ Bloques": round(sol["vol_bloques_m3"], 4),
-                    "m³ Tablas": round(sol["vol_tablas_m3"], 4),
-                    "m³ Kerf": round(sol["vol_kerf_m3"], 4),
-                    "Rendimiento (%)": round(sol["aprovechamiento_pct"], 2),
-                    "Bloque Base Z=0 (cm)": sol["p2_seq"][-1]
-                }
+            with col_p2:
+                st.markdown("**FASE 2: Cortes Cantón Volteado (Z=0.00 cm)**")
+                plan_f2 = []
+                c_num = len(sol["cotas_fase1"])
+                for idx, item in enumerate(sol["cotas_fase2"]):
+                    if item["z_bot"] > 0.001:
+                        c_num += 1
+                        plan_f2.append({
+                            "N° Corte": f"Corte #{c_num}",
+                            "Cota Z (Sierra)": f"{item['cota_z_corte']:.2f} cm",
+                            "Pieza Extraída": f"{item['tipo']} {item['espesor']:.1f} cm",
+                            "Ancho Útil": f"{item['ancho_rect']:.1f} cm"
+                        })
+                    else:
+                        plan_f2.append({
+                            "N° Corte": "Base (Apoyo)",
+                            "Cota Z (Sierra)": "0.00 cm",
+                            "Pieza Extraída": f"Bloque Base {item['espesor']:.1f} cm",
+                            "Ancho Útil": f"{item['ancho_rect']:.1f} cm"
+                        })
+                st.table(pd.DataFrame(plan_f2))
 
-                st.session_state.historial.append(nuevo_registro)
-                st.success("✅ Tronco guardado en el reporte acumulado diario local.")
+            # REGISTRO
+            st.markdown("---")
+            col_btn, _ = st.columns([4, 6])
+            with col_btn:
+                if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
+                    dj = st.session_state.datos_jornada
+                    nuevo_registro = {
+                        "ID": len(st.session_state.historial) + 1,
+                        "Fecha_Hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Aserradero": dj["aserradero"],
+                        "Turno": dj["turno"],
+                        "Operadores": dj["operadores"],
+                        "D.Menor (cm)": d_menor,
+                        "D.Mayor (cm)": d_mayor,
+                        "Largo (cm)": largo,
+                        "m³ Entrada": round(sol["vol_bruto_m3"], 4),
+                        "m³ Útil (Rectangular)": round(sol["vol_m3"], 4),
+                        "m³ Bloques": round(sol["vol_bloques_m3"], 4),
+                        "m³ Tablas": round(sol["vol_tablas_m3"], 4),
+                        "m³ Kerf": round(sol["vol_kerf_m3"], 4),
+                        "Rendimiento (%)": round(sol["aprovechamiento_pct"], 2),
+                        "Bloque Base Z=0 (cm)": sol["p2_seq"][-1]
+                    }
 
-                if WEBAPP_URL:
-                    try:
-                        url_limpia = WEBAPP_URL.strip()
-                        params = {
-                            "id": nuevo_registro["ID"],
-                            "fecha_hora": nuevo_registro["Fecha_Hora"],
-                            "d_menor": nuevo_registro["D.Menor (cm)"],
-                            "d_mayor": nuevo_registro["D.Mayor (cm)"],
-                            "largo": nuevo_registro["Largo (cm)"],
-                            "m3_entrada": nuevo_registro["m³ Entrada"],
-                            "m3_util": nuevo_registro["m³ Útil (Rectangular)"],
-                            "m3_bloques": nuevo_registro["m³ Bloques"],
-                            "m3_tablas": nuevo_registro["m³ Tablas"],
-                            "m3_kerf": nuevo_registro["m³ Kerf"],
-                            "rendimiento": nuevo_registro["Rendimiento (%)"],
-                            "bloque_base": nuevo_registro["Bloque Base Z=0 (cm)"]
-                        }
-                        
-                        res = requests.get(url_limpia, params=params, timeout=10)
-                        if res.status_code == 200:
-                            st.info("☁️ Registro respaldado con éxito en Google Sheets.")
-                        else:
-                            st.warning(f"Guardado localmente. Código de respuesta de Google: {res.status_code}")
-                    except Exception as ex:
-                        st.warning(f"Guardado localmente. No se pudo conectar a la web: {ex}")
-                else:
-                    st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar la subida a la nube.")
-else:
-    st.info("⚠️ Para generar el plan de corte, asegura que los diámetros del tronco sean mayores a 0 cm y que al menos una medida esté marcada con el visto y con un valor mayor a 0 cm.")
+                    st.session_state.historial.append(nuevo_registro)
+                    st.success("✅ Tronco guardado en el reporte acumulado diario local.")
+
+                    if WEBAPP_URL:
+                        try:
+                            url_limpia = WEBAPP_URL.strip()
+                            params = {
+                                "id": nuevo_registro["ID"],
+                                "fecha_hora": nuevo_registro["Fecha_Hora"],
+                                "aserradero": nuevo_registro["Aserradero"],
+                                "turno": nuevo_registro["Turno"],
+                                "operadores": nuevo_registro["Operadores"],
+                                "d_menor": nuevo_registro["D.Menor (cm)"],
+                                "d_mayor": nuevo_registro["D.Mayor (cm)"],
+                                "largo": nuevo_registro["Largo (cm)"],
+                                "m3_entrada": nuevo_registro["m³ Entrada"],
+                                "m3_util": nuevo_registro["m³ Útil (Rectangular)"],
+                                "m3_bloques": nuevo_registro["m³ Bloques"],
+                                "m3_tablas": nuevo_registro["m³ Tablas"],
+                                "m3_kerf": nuevo_registro["m³ Kerf"],
+                                "rendimiento": nuevo_registro["Rendimiento (%)"],
+                                "bloque_base": nuevo_registro["Bloque Base Z=0 (cm)"]
+                            }
+                            
+                            res = requests.get(url_limpia, params=params, timeout=10)
+                            if res.status_code == 200:
+                                st.info("☁️ Registro respaldado con éxito en Google Sheets.")
+                            else:
+                                st.warning(f"Guardado localmente. Código de respuesta de Google: {res.status_code}")
+                        except Exception as ex:
+                            st.warning(f"Guardado localmente. No se pudo conectar a la web: {ex}")
+                    else:
+                        st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar la subida a la nube.")
+    else:
+        st.info("⚠️ Ingresa diámetros mayores a 0 cm y marca al menos una medida activa mayor a 0 cm.")
 
 
 # =========================================================
-# 6. REPORTE ACUMULADO Y TOTALIZACIÓN DE PRODUCCIÓN
+# REPORTE ACUMULADO Y TOTALIZACIÓN DE PRODUCCIÓN
 # =========================================================
 if st.session_state.historial:
     st.markdown("---")
-    st.markdown("## 📊 Reporte de Producción Acumulado Diario")
+    st.markdown("## 📊 Reporte de Producción Acumulado de la Jornada")
     
     df_hist = pd.DataFrame(st.session_state.historial)
 
@@ -456,10 +519,12 @@ if st.session_state.historial:
     st4.metric("Total m³ Tablas", f"{tot_tablas:.3f} m³")
     st5.metric("Rendimiento Global", f"{prom_rend:.1f} %")
 
-    # Fila de totalización al DataFrame
     row_total = {
         "ID": "TOTAL",
         "Fecha_Hora": "-",
+        "Aserradero": "-",
+        "Turno": "-",
+        "Operadores": "-",
         "D.Menor (cm)": "-",
         "D.Mayor (cm)": "-",
         "Largo (cm)": "-",
@@ -480,9 +545,9 @@ if st.session_state.historial:
         df_export.to_excel(writer, index=False, sheet_name='Reporte_Produccion')
 
     st.download_button(
-        label="📥 Descargar Reporte de Producción con Totales (.xlsx)",
+        label="📥 Descargar Reporte de Producción de Jornada (.xlsx)",
         data=output.getvalue(),
-        file_name="reporte_produccion_aserradero_totales.xlsx",
+        file_name=f"reporte_produccion_aserradero_{datetime.now().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary"
     )
