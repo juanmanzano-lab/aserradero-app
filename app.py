@@ -29,25 +29,35 @@ WEBAPP_URL = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
 st.sidebar.title("📋 Control de Jornada")
 
 if not st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada:
-    st.sidebar.subheader("Iniciar Nueva Jornada")
+    st.sidebar.subheader("Parámetros Generales")
     fecha_jornada = st.sidebar.date_input("Fecha", datetime.now())
-    turno = st.sidebar.selectbox("Turno de Trabajo", ["Turno Mañana", "Turno Tarde", "Turno Noche"])
-    aserradero = st.sidebar.selectbox("Tipo de Aserradero", ["Aserradero Manual", "Aserradero Hidráulico"])
-    
-    st.sidebar.markdown("**Equipo de Operadores (3 Personas)**")
-    op1 = st.sidebar.text_input("Operador 1", value="")
-    op2 = st.sidebar.text_input("Operador 2", value="")
-    op3 = st.sidebar.text_input("Operador 3", value="")
-    
+    turno = st.sidebar.selectbox("Turno de Trabajo", ["Diurno", "Nocturno"])
+    kerf_mm = st.sidebar.number_input("Kerf de Sierra (mm)", min_value=1.0, max_value=10.0, value=2.5, step=0.1)
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🪓 Equipo Aserradero Manual")
+    op_m1 = st.sidebar.text_input("Operador 1 (Manual)", value="", key="op_m1")
+    op_m2 = st.sidebar.text_input("Operador 2 (Manual)", value="", key="op_m2")
+    op_m3 = st.sidebar.text_input("Operador 3 (Manual)", value="", key="op_m3")
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ Equipo Aserradero Hidráulico")
+    op_h1 = st.sidebar.text_input("Operador 1 (Hidráulico)", value="", key="op_h1")
+    op_h2 = st.sidebar.text_input("Operador 2 (Hidráulico)", value="", key="op_h2")
+    op_h3 = st.sidebar.text_input("Operador 3 (Hidráulico)", value="", key="op_h3")
+
+    st.sidebar.markdown("---")
     if st.sidebar.button("🚀 Iniciar Jornada", type="primary", use_container_width=True):
-        if not op1.strip() or not op2.strip() or not op3.strip():
-            st.sidebar.error("⚠️ Debes registrar el nombre de los 3 operadores para iniciar.")
+        # Validación de registro de las 6 personas
+        if not (op_m1.strip() and op_m2.strip() and op_m3.strip() and op_h1.strip() and op_h2.strip() and op_h3.strip()):
+            st.sidebar.error("⚠️ Debes registrar los 3 operadores de AMBOS equipos para iniciar la jornada.")
         else:
             st.session_state.datos_jornada = {
                 "fecha": fecha_jornada.strftime("%Y-%m-%d"),
                 "turno": turno,
-                "aserradero": aserradero,
-                "operadores": f"{op1.strip()}, {op2.strip()}, {op3.strip()}"
+                "kerf_mm": kerf_mm,
+                "equipo_manual": f"{op_m1.strip()}, {op_m2.strip()}, {op_m3.strip()}",
+                "equipo_hidraulico": f"{op_h1.strip()}, {op_h2.strip()}, {op_h3.strip()}"
             }
             st.session_state.jornada_iniciada = True
             st.rerun()
@@ -57,8 +67,9 @@ elif st.session_state.jornada_iniciada and not st.session_state.jornada_finaliza
     dj = st.session_state.datos_jornada
     st.sidebar.markdown(f"**Fecha:** {dj['fecha']}")
     st.sidebar.markdown(f"**Turno:** {dj['turno']}")
-    st.sidebar.markdown(f"**Aserradero:** {dj['aserradero']}")
-    st.sidebar.markdown(f"**Operadores:**\n{dj['operadores']}")
+    st.sidebar.markdown(f"**Kerf Configurado:** {dj['kerf_mm']} mm")
+    st.sidebar.markdown(f"**Equipo Manual:**\n{dj['equipo_manual']}")
+    st.sidebar.markdown(f"**Equipo Hidráulico:**\n{dj['equipo_hidraulico']}")
     
     st.sidebar.markdown("---")
     if st.sidebar.button("🛑 Finalizar Jornada", type="secondary", use_container_width=True):
@@ -71,8 +82,9 @@ elif st.session_state.jornada_finalizada:
     dj = st.session_state.datos_jornada
     st.sidebar.markdown(f"**Fecha:** {dj['fecha']}")
     st.sidebar.markdown(f"**Turno:** {dj['turno']}")
-    st.sidebar.markdown(f"**Aserradero:** {dj['aserradero']}")
-    st.sidebar.markdown(f"**Operadores:**\n{dj['operadores']}")
+    st.sidebar.markdown(f"**Kerf Configurado:** {dj['kerf_mm']} mm")
+    st.sidebar.markdown(f"**Equipo Manual:**\n{dj['equipo_manual']}")
+    st.sidebar.markdown(f"**Equipo Hidráulico:**\n{dj['equipo_hidraulico']}")
     
     st.sidebar.markdown("---")
     if st.sidebar.button("🔄 Iniciar Nueva Jornada", type="primary", use_container_width=True):
@@ -92,7 +104,7 @@ st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**
 if st.session_state.jornada_finalizada:
     st.warning("🔒 **La jornada de trabajo ha sido finalizada.** El sistema se encuentra bloqueado para nuevos registros.")
 elif not st.session_state.jornada_iniciada:
-    st.info("👈 **Por favor, completa la información de la jornada y presiona 'Iniciar Jornada' en el menú lateral para habilitar el registro de produccion.**")
+    st.info("👈 **Por favor, completa la información de la jornada en el menú lateral y presiona 'Iniciar Jornada' para comenzar a procesar troncos.**")
 
 
 # =========================================================
@@ -344,17 +356,20 @@ def generar_grafico_cortes(sol, d_menor):
 # FORMULARIO DE INGRESO (HABILITADO SI LA JORNADA ESTÁ ACTIVA)
 # =========================================================
 if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada:
-    st.header("📐 Dimensiones del Tronco")
+    st.header("📐 Dimensiones del Tronco y Selección de Aserradero")
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        d_menor = st.number_input("Diámetro Menor (cm)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+        aserradero_sel = st.selectbox("Aserradero en Proceso", ["Aserradero Manual", "Aserradero Hidráulico"])
     with col2:
-        d_mayor = st.number_input("Diámetro Mayor (cm)", min_value=0.0, max_value=120.0, value=0.0, step=0.5)
+        d_menor = st.number_input("Diámetro Menor (cm)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
     with col3:
-        largo = st.number_input("Largo del Tronco (cm)", min_value=0.0, max_value=1000.0, value=250.0, step=10.0)
+        d_mayor = st.number_input("Diámetro Mayor (cm)", min_value=0.0, max_value=120.0, value=0.0, step=0.5)
     with col4:
-        kerf_mm = st.number_input("Kerf de Sierra (mm)", min_value=1.0, max_value=10.0, value=2.5, step=0.1)
+        largo = st.number_input("Largo del Tronco (cm)", min_value=0.0, max_value=1000.0, value=250.0, step=10.0)
+
+    # El kerf se toma directamente de la constante configurada en la jornada
+    kerf_mm = st.session_state.datos_jornada["kerf_mm"]
 
     if d_mayor < d_menor and d_menor > 0:
         st.warning("⚠️ El diámetro mayor debe ser mayor o igual al menor. Se ajustará al valor menor.")
@@ -441,12 +456,16 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
             with col_btn:
                 if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
                     dj = st.session_state.datos_jornada
+                    
+                    # Se determina el equipo de operadores según el aserradero seleccionado para este tronco
+                    operadores_activos = dj["equipo_manual"] if aserradero_sel == "Aserradero Manual" else dj["equipo_hidraulico"]
+
                     nuevo_registro = {
                         "ID": len(st.session_state.historial) + 1,
                         "Fecha_Hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "Aserradero": dj["aserradero"],
+                        "Aserradero": aserradero_sel,
                         "Turno": dj["turno"],
-                        "Operadores": dj["operadores"],
+                        "Operadores": operadores_activos,
                         "D.Menor (cm)": d_menor,
                         "D.Mayor (cm)": d_mayor,
                         "Largo (cm)": largo,
