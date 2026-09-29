@@ -20,6 +20,7 @@ if "jornada_finalizada" not in st.session_state:
 if "datos_jornada" not in st.session_state:
     st.session_state.datos_jornada = {}
 
+# Carga de URL de Google Sheets desde Secrets
 WEBAPP_URL = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
 
 
@@ -48,7 +49,6 @@ if not st.session_state.jornada_iniciada and not st.session_state.jornada_finali
 
     st.sidebar.markdown("---")
     if st.sidebar.button("🚀 Iniciar Jornada", type="primary", use_container_width=True):
-        # Validación de registro de las 6 personas
         if not (op_m1.strip() and op_m2.strip() and op_m3.strip() and op_h1.strip() and op_h2.strip() and op_h3.strip()):
             st.sidebar.error("⚠️ Debes registrar los 3 operadores de AMBOS equipos para iniciar la jornada.")
         else:
@@ -96,28 +96,22 @@ elif st.session_state.jornada_finalizada:
 
 
 # =========================================================
-# TÍTULO Y MENSAJES DE ESTADO
+# TÍTULO Y ESTADO DE APLICACIÓN
 # =========================================================
 st.title("🪓 Optimización y Registro de Aserrado de Troncos")
 
-# --- DIAGNÓSTICO TEMPORAL DE SECRETS ---
-if "GOOGLE_SHEET_WEBAPP_URL" in st.secrets and st.secrets["GOOGLE_SHEET_WEBAPP_URL"] != "":
-    st.success("✅ La URL de Google Sheets fue detectada correctamente en Secrets.")
+# Diagnóstico de lectura de Secrets
+if WEBAPP_URL:
+    st.success("✅ Conexión con Google Drive detectada en Secrets.")
 else:
-    st.error("❌ Streamlit no encuentra la clave 'GOOGLE_SHEET_WEBAPP_URL' en Secrets.")
+    st.error("❌ No se ha detectado la clave 'GOOGLE_SHEET_WEBAPP_URL' en Secrets.")
 
 st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento en la nube.")
 
 if st.session_state.jornada_finalizada:
     st.warning("🔒 **La jornada de trabajo ha sido finalizada.** El sistema se encuentra bloqueado para nuevos registros.")
 elif not st.session_state.jornada_iniciada:
-    st.info("👈 **Por favor, completa la información de la jornada en el menú lateral y presiona 'Iniciar Jornada' para comenzar a procesar troncos.**")
-st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento.")
-
-if st.session_state.jornada_finalizada:
-    st.warning("🔒 **La jornada de trabajo ha sido finalizada.** El sistema se encuentra bloqueado para nuevos registros.")
-elif not st.session_state.jornada_iniciada:
-    st.info("👈 **Por favor, completa la información de la jornada en el menú lateral y presiona 'Iniciar Jornada' para comenzar a procesar troncos.**")
+    st.info("👈 **Por favor, completa la información de los equipos en el menú lateral y presiona 'Iniciar Jornada' para comenzar.**")
 
 
 # =========================================================
@@ -381,7 +375,7 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
     with col4:
         largo = st.number_input("Largo del Tronco (cm)", min_value=0.0, max_value=1000.0, value=250.0, step=10.0)
 
-    # El kerf se toma directamente de la constante configurada en la jornada
+    # El kerf se toma de la constante configurada en la jornada activa
     kerf_mm = st.session_state.datos_jornada["kerf_mm"]
 
     if d_mayor < d_menor and d_menor > 0:
@@ -463,14 +457,13 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
                         })
                 st.table(pd.DataFrame(plan_f2))
 
-            # REGISTRO
+            # REGISTRO DUAL
             st.markdown("---")
             col_btn, _ = st.columns([4, 6])
             with col_btn:
                 if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
                     dj = st.session_state.datos_jornada
                     
-                    # Se determina el equipo de operadores según el aserradero seleccionado para este tronco
                     operadores_activos = dj["equipo_manual"] if aserradero_sel == "Aserradero Manual" else dj["equipo_hidraulico"]
 
                     nuevo_registro = {
@@ -517,7 +510,7 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
                             
                             res = requests.get(url_limpia, params=params, timeout=10)
                             if res.status_code == 200:
-                                st.info("☁️ Registro respaldado con éxito en Google Sheets.")
+                                st.info("☁️ Registro respaldado con éxito en Google Sheets (Drive).")
                             else:
                                 st.warning(f"Guardado localmente. Código de respuesta de Google: {res.status_code}")
                         except Exception as ex:
