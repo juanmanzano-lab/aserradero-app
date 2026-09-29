@@ -99,6 +99,19 @@ elif st.session_state.jornada_finalizada:
 # TÍTULO Y MENSAJES DE ESTADO
 # =========================================================
 st.title("🪓 Optimización y Registro de Aserrado de Troncos")
+
+# --- DIAGNÓSTICO TEMPORAL DE SECRETS ---
+if "GOOGLE_SHEET_WEBAPP_URL" in st.secrets and st.secrets["GOOGLE_SHEET_WEBAPP_URL"] != "":
+    st.success("✅ La URL de Google Sheets fue detectada correctamente en Secrets.")
+else:
+    st.error("❌ Streamlit no encuentra la clave 'GOOGLE_SHEET_WEBAPP_URL' en Secrets.")
+
+st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento en la nube.")
+
+if st.session_state.jornada_finalizada:
+    st.warning("🔒 **La jornada de trabajo ha sido finalizada.** El sistema se encuentra bloqueado para nuevos registros.")
+elif not st.session_state.jornada_iniciada:
+    st.info("👈 **Por favor, completa la información de la jornada en el menú lateral y presiona 'Iniciar Jornada' para comenzar a procesar troncos.**")
 st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento.")
 
 if st.session_state.jornada_finalizada:
