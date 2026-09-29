@@ -20,8 +20,12 @@ if "jornada_finalizada" not in st.session_state:
 if "datos_jornada" not in st.session_state:
     st.session_state.datos_jornada = {}
 
-# Carga de URL de Google Sheets desde Secrets
-WEBAPP_URL = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
+# Lectura segura de Secrets con valor por defecto
+url_secret = ""
+try:
+    url_secret = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
+except Exception:
+    url_secret = ""
 
 
 # =========================================================
@@ -34,6 +38,15 @@ if not st.session_state.jornada_iniciada and not st.session_state.jornada_finali
     fecha_jornada = st.sidebar.date_input("Fecha", datetime.now())
     turno = st.sidebar.selectbox("Turno de Trabajo", ["Diurno", "Nocturno"])
     kerf_mm = st.sidebar.number_input("Kerf de Sierra (mm)", min_value=1.0, max_value=10.0, value=2.5, step=0.1)
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("☁️ Conexión a Google Drive")
+    webapp_url_input = st.sidebar.text_input(
+        "URL de Google Apps Script",
+        value=url_secret,
+        placeholder="https://script.google.com/macros/s/.../exec",
+        help="Si Secrets no está cargado, pega tu URL de Google Apps Script aquí."
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("🪓 Equipo Aserradero Manual")
@@ -56,6 +69,7 @@ if not st.session_state.jornada_iniciada and not st.session_state.jornada_finali
                 "fecha": fecha_jornada.strftime("%Y-%m-%d"),
                 "turno": turno,
                 "kerf_mm": kerf_mm,
+                "webapp_url": webapp_url_input.strip(),
                 "equipo_manual": f"{op_m1.strip()}, {op_m2.strip()}, {op_m3.strip()}",
                 "equipo_hidraulico": f"{op_h1.strip()}, {op_h2.strip()}, {op_h3.strip()}"
             }
@@ -68,6 +82,10 @@ elif st.session_state.jornada_iniciada and not st.session_state.jornada_finaliza
     st.sidebar.markdown(f"**Fecha:** {dj['fecha']}")
     st.sidebar.markdown(f"**Turno:** {dj['turno']}")
     st.sidebar.markdown(f"**Kerf Configurado:** {dj['kerf_mm']} mm")
+    if dj.get("webapp_url"):
+        st.sidebar.markdown("☁️ **Google Drive:** Conectado")
+    else:
+        st.sidebar.markdown("⚠️ **Google Drive:** Sin URL")
     st.sidebar.markdown(f"**Equipo Manual:**\n{dj['equipo_manual']}")
     st.sidebar.markdown(f"**Equipo Hidráulico:**\n{dj['equipo_hidraulico']}")
     
@@ -100,11 +118,17 @@ elif st.session_state.jornada_finalizada:
 # =========================================================
 st.title("🪓 Optimización y Registro de Aserrado de Troncos")
 
-# Diagnóstico de lectura de Secrets
-if WEBAPP_URL:
-    st.success("✅ Conexión con Google Drive detectada en Secrets.")
+# Determinación de la URL activa
+WEBAPP_URL = ""
+if st.session_state.jornada_iniciada or st.session_state.jornada_finalizada:
+    WEBAPP_URL = st.session_state.datos_jornada.get("webapp_url", "")
 else:
-    st.error("❌ No se ha detectado la clave 'GOOGLE_SHEET_WEBAPP_URL' en Secrets.")
+    WEBAPP_URL = url_secret
+
+if WEBAPP_URL:
+    st.success("✅ Conexión con Google Drive lista.")
+else:
+    st.warning("⚠️ No se ha detectado la URL en Secrets. **Puedes pegarla manualmente en el campo 'URL de Google Apps Script' del menú lateral.**")
 
 st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento en la nube.")
 
@@ -375,7 +399,6 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
     with col4:
         largo = st.number_input("Largo del Tronco (cm)", min_value=0.0, max_value=1000.0, value=250.0, step=10.0)
 
-    # El kerf se toma de la constante configurada en la jornada activa
     kerf_mm = st.session_state.datos_jornada["kerf_mm"]
 
     if d_mayor < d_menor and d_menor > 0:
@@ -457,13 +480,12 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
                         })
                 st.table(pd.DataFrame(plan_f2))
 
-            # REGISTRO DUAL
+            # REGISTRO
             st.markdown("---")
             col_btn, _ = st.columns([4, 6])
             with col_btn:
                 if st.button("📌 Registrar Tronco Procesado en Reporte Diario", type="primary", use_container_width=True):
                     dj = st.session_state.datos_jornada
-                    
                     operadores_activos = dj["equipo_manual"] if aserradero_sel == "Aserradero Manual" else dj["equipo_hidraulico"]
 
                     nuevo_registro = {
@@ -516,7 +538,7 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
                         except Exception as ex:
                             st.warning(f"Guardado localmente. No se pudo conectar a la web: {ex}")
                     else:
-                        st.caption("ℹ️ Nota: Configura GOOGLE_SHEET_WEBAPP_URL en Secrets para activar la subida a la nube.")
+                        st.caption("ℹ️ Nota: No ingresaste una URL de Google Apps Script. El registro queda guardado en la tabla de abajo.")
     else:
         st.info("⚠️ Ingresa diámetros mayores a 0 cm y marca al menos una medida activa mayor a 0 cm.")
 
