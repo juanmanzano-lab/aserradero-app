@@ -20,7 +20,7 @@ if "jornada_finalizada" not in st.session_state:
 if "datos_jornada" not in st.session_state:
     st.session_state.datos_jornada = {}
 
-# Lectura segura de Secrets con valor por defecto
+# Lectura segura de Secrets
 url_secret = ""
 try:
     url_secret = st.secrets.get("GOOGLE_SHEET_WEBAPP_URL", "")
@@ -45,7 +45,7 @@ if not st.session_state.jornada_iniciada and not st.session_state.jornada_finali
         "URL de Google Apps Script",
         value=url_secret,
         placeholder="https://script.google.com/macros/s/.../exec",
-        help="Si Secrets no está cargado, pega tu URL de Google Apps Script aquí."
+        help="Pega aquí la URL WebApp de Google Apps Script."
     )
 
     st.sidebar.markdown("---")
@@ -68,7 +68,7 @@ if not st.session_state.jornada_iniciada and not st.session_state.jornada_finali
             st.session_state.datos_jornada = {
                 "fecha": fecha_jornada.strftime("%Y-%m-%d"),
                 "turno": turno,
-                "kerf_mm": kerf_mm,
+                "kerf_mm": float(kerf_mm),
                 "webapp_url": webapp_url_input.strip(),
                 "equipo_manual": f"{op_m1.strip()}, {op_m2.strip()}, {op_m3.strip()}",
                 "equipo_hidraulico": f"{op_h1.strip()}, {op_h2.strip()}, {op_h3.strip()}"
@@ -118,7 +118,6 @@ elif st.session_state.jornada_finalizada:
 # =========================================================
 st.title("🪓 Optimización y Registro de Aserrado de Troncos")
 
-# Determinación de la URL activa
 WEBAPP_URL = ""
 if st.session_state.jornada_iniciada or st.session_state.jornada_finalizada:
     WEBAPP_URL = st.session_state.datos_jornada.get("webapp_url", "")
@@ -128,7 +127,7 @@ else:
 if WEBAPP_URL:
     st.success("✅ Conexión con Google Drive lista.")
 else:
-    st.warning("⚠️ No se ha detectado la URL en Secrets. **Puedes pegarla manualmente en el campo 'URL de Google Apps Script' del menú lateral.**")
+    st.warning("⚠️ No se ha detectado la URL en Secrets. Puedes pegarla manualmente en el menú lateral.")
 
 st.markdown("Sistema inteligente con cálculo de **canto vivo 100% rectangular**, plan de corte y almacenamiento en la nube.")
 
@@ -489,21 +488,21 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
                     operadores_activos = dj["equipo_manual"] if aserradero_sel == "Aserradero Manual" else dj["equipo_hidraulico"]
 
                     nuevo_registro = {
-                        "ID": len(st.session_state.historial) + 1,
+                        "ID": int(len(st.session_state.historial) + 1),
                         "Fecha_Hora": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "Aserradero": aserradero_sel,
-                        "Turno": dj["turno"],
-                        "Operadores": operadores_activos,
-                        "D.Menor (cm)": d_menor,
-                        "D.Mayor (cm)": d_mayor,
-                        "Largo (cm)": largo,
-                        "m³ Entrada": round(sol["vol_bruto_m3"], 4),
-                        "m³ Útil (Rectangular)": round(sol["vol_m3"], 4),
-                        "m³ Bloques": round(sol["vol_bloques_m3"], 4),
-                        "m³ Tablas": round(sol["vol_tablas_m3"], 4),
-                        "m³ Kerf": round(sol["vol_kerf_m3"], 4),
-                        "Rendimiento (%)": round(sol["aprovechamiento_pct"], 2),
-                        "Bloque Base Z=0 (cm)": sol["p2_seq"][-1]
+                        "Aserradero": str(aserradero_sel),
+                        "Turno": str(dj["turno"]),
+                        "Operadores": str(operadores_activos),
+                        "D.Menor (cm)": round(float(d_menor), 2),
+                        "D.Mayor (cm)": round(float(d_mayor), 2),
+                        "Largo (cm)": round(float(largo), 2),
+                        "m³ Entrada": round(float(sol["vol_bruto_m3"]), 4),
+                        "m³ Útil (Rectangular)": round(float(sol["vol_m3"]), 4),
+                        "m³ Bloques": round(float(sol["vol_bloques_m3"]), 4),
+                        "m³ Tablas": round(float(sol["vol_tablas_m3"]), 4),
+                        "m³ Kerf": round(float(sol["vol_kerf_m3"]), 4),
+                        "Rendimiento (%)": round(float(sol["aprovechamiento_pct"]), 2),
+                        "Bloque Base Z=0 (cm)": round(float(sol["p2_seq"][-1]), 2)
                     }
 
                     st.session_state.historial.append(nuevo_registro)
@@ -512,33 +511,35 @@ if st.session_state.jornada_iniciada and not st.session_state.jornada_finalizada
                     if WEBAPP_URL:
                         try:
                             url_limpia = WEBAPP_URL.strip()
+                            
+                            # Envío explicito de números decimales formateados como punto
                             params = {
                                 "id": nuevo_registro["ID"],
                                 "fecha_hora": nuevo_registro["Fecha_Hora"],
                                 "aserradero": nuevo_registro["Aserradero"],
                                 "turno": nuevo_registro["Turno"],
                                 "operadores": nuevo_registro["Operadores"],
-                                "d_menor": nuevo_registro["D.Menor (cm)"],
-                                "d_mayor": nuevo_registro["D.Mayor (cm)"],
-                                "largo": nuevo_registro["Largo (cm)"],
-                                "m3_entrada": nuevo_registro["m³ Entrada"],
-                                "m3_util": nuevo_registro["m³ Útil (Rectangular)"],
-                                "m3_bloques": nuevo_registro["m³ Bloques"],
-                                "m3_tablas": nuevo_registro["m³ Tablas"],
-                                "m3_kerf": nuevo_registro["m³ Kerf"],
-                                "rendimiento": nuevo_registro["Rendimiento (%)"],
-                                "bloque_base": nuevo_registro["Bloque Base Z=0 (cm)"]
+                                "d_menor": f"{nuevo_registro['D.Menor (cm)']:.2f}",
+                                "d_mayor": f"{nuevo_registro['D.Mayor (cm)']:.2f}",
+                                "largo": f"{nuevo_registro['Largo (cm)']:.2f}",
+                                "m3_entrada": f"{nuevo_registro['m³ Entrada']:.4f}",
+                                "m3_util": f"{nuevo_registro['m³ Útil (Rectangular)']:.4f}",
+                                "m3_bloques": f"{nuevo_registro['m³ Bloques']:.4f}",
+                                "m3_tablas": f"{nuevo_registro['m³ Tablas']:.4f}",
+                                "m3_kerf": f"{nuevo_registro['m³ Kerf']:.4f}",
+                                "rendimiento": f"{nuevo_registro['Rendimiento (%)']:.2f}",
+                                "bloque_base": f"{nuevo_registro['Bloque Base Z=0 (cm)']:.2f}"
                             }
                             
                             res = requests.get(url_limpia, params=params, timeout=10)
                             if res.status_code == 200:
-                                st.info("☁️ Registro respaldado con éxito en Google Sheets (Drive).")
+                                st.info("☁️ Registro respaldado con éxito en Google Sheets con decimales precisos.")
                             else:
                                 st.warning(f"Guardado localmente. Código de respuesta de Google: {res.status_code}")
                         except Exception as ex:
                             st.warning(f"Guardado localmente. No se pudo conectar a la web: {ex}")
                     else:
-                        st.caption("ℹ️ Nota: No ingresaste una URL de Google Apps Script. El registro queda guardado en la tabla de abajo.")
+                        st.caption("ℹ️️ Nota: No ingresaste una URL de Google Apps Script. El registro queda guardado en la tabla de abajo.")
     else:
         st.info("⚠️ Ingresa diámetros mayores a 0 cm y marca al menos una medida activa mayor a 0 cm.")
 
@@ -552,19 +553,19 @@ if st.session_state.historial:
     
     df_hist = pd.DataFrame(st.session_state.historial)
 
-    tot_bruto = df_hist["m³ Entrada"].sum()
-    tot_util = df_hist["m³ Útil (Rectangular)"].sum()
-    tot_bloques = df_hist["m³ Bloques"].sum()
-    tot_tablas = df_hist["m³ Tablas"].sum()
-    tot_kerf = df_hist["m³ Kerf"].sum()
-    prom_rend = (tot_util / tot_bruto * 100.0) if tot_bruto > 0 else 0.0
+    tot_bruto = float(df_hist["m³ Entrada"].sum())
+    tot_util = float(df_hist["m³ Útil (Rectangular)"].sum())
+    tot_bloques = float(df_hist["m³ Bloques"].sum())
+    tot_tablas = float(df_hist["m³ Tablas"].sum())
+    tot_kerf = float(df_hist["m³ Kerf"].sum())
+    prom_rend = float((tot_util / tot_bruto * 100.0)) if tot_bruto > 0 else 0.0
 
     st1, st2, st3, st4, st5 = st.columns(5)
-    st1.metric("Total m³ Entrada", f"{tot_bruto:.3f} m³")
-    st2.metric("Total m³ Útil", f"{tot_util:.3f} m³")
-    st3.metric("Total m³ Bloques", f"{tot_bloques:.3f} m³")
-    st4.metric("Total m³ Tablas", f"{tot_tablas:.3f} m³")
-    st5.metric("Rendimiento Global", f"{prom_rend:.1f} %")
+    st1.metric("Total m³ Entrada", f"{tot_bruto:.4f} m³")
+    st2.metric("Total m³ Útil", f"{tot_util:.4f} m³")
+    st3.metric("Total m³ Bloques", f"{tot_bloques:.4f} m³")
+    st4.metric("Total m³ Tablas", f"{tot_tablas:.4f} m³")
+    st5.metric("Rendimiento Global", f"{prom_rend:.2f} %")
 
     row_total = {
         "ID": "TOTAL",
